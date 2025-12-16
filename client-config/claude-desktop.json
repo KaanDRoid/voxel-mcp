@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "voxel-mcp": {
+      "command": "node",
+      "args": [
+        "dist/index.js"
+      ],
+      "cwd": "C:\\Projects\\MagicVoxel\\voxel-mcp",
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}
+
