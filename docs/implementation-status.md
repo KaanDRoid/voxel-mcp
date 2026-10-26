@@ -8,8 +8,9 @@ round-trip test is not evidence of live application control or complete parity.
 
 | Area | Roadmap tasks | Status |
 | --- | --- | --- |
-| Tool catalog baseline and naming snapshot | P0-2 | Implemented; the current snapshot contains 155 unique tools. |
+| Tool catalog baseline and naming snapshot | P0-2 | Implemented; the current snapshot contains 158 unique tools. |
 | Application launch validation | P0-3 | Mock-spawn tests pass; only .vox files are accepted and the working directory is the installation folder. A generated scene has also been opened and rendered in a separate copy of the application; the original install was unchanged. |
+| Live application control (Windows, opt-in) | P10 | Implemented through the application's own console and Final Render dialog. Process identity and the finished PNG are verified; camera commands are verified only as submitted. Calibrated on 0.99.7.2 at the stock UI scale; turntable and animation renders are not exposed. |
 | Low-level render and camera setters | P4 | Native rOBJ settings and rCAM slots 0..9 can be merged and saved; this is not renderer automation or a physical-light API. |
 | Material id range | P0-5 | Material ids 1..256 are accepted. The interpretation of id 256 remains unverified in the application. |
 | Installation discovery, configuration and read-only roots | P1-1, P1-2, P1-3, P1-4 | Implemented. The installation is protected even if it is inside the workspace. |
@@ -58,7 +59,7 @@ models, palettes, shaders or environment images.
 - High-level typed material/lighting/camera presets and numeric validation (phase 4); low-level native dictionary setters are implemented.
 - Native VOX animation editing and the animation-to-scene bridge (phase 5).
 - Installation-palette convenience tools and additional export parity work.
-- Preview lighting, scene rendering and turntable export (phase 10).
+- Turntable and animation final renders, reading the camera back, and live control on other operating systems (phase 10).
 - Declarative file/effect metadata, structured outputs, cancellation and toolsets
   (phase 11); versioned release and package publication (phase 12).
 

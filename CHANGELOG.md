@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Opt-in live control of a running MagicaVoxel window on Windows (`MAGICVOXEL_MCP_UI_AUTOMATION=1`): `attach_magicavoxel_app` pins a process by executable path, id and start time; `set_app_camera` sends the application's console camera commands; `export_native_render` runs the native Final Render and returns only after the PNG has been verified.
+- `examples/neon-alley`: a complete scene built through the tools, with its script, palette, scene file and native render.
+- `inspectPng` validates PNG structure, bounds and (optionally) checksums without decoding pixels.
+
 - `set_scene_render_object` merges native render dictionaries by type; `set_scene_camera` merges camera slots 0..9. These are low-level saved-file controls, not native renderer automation.
 
 - Tools `get_magicavoxel_info`, `list_magicavoxel_samples`, `list_magicavoxel_palettes`, `list_magicavoxel_shaders`, `list_magicavoxel_ibl` and `load_magicavoxel_sample` (read-only discovery of a MagicaVoxel installation).

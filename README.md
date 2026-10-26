@@ -2,6 +2,10 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for procedural voxel modeling and MagicaVoxel (`.vox`) file workflows. It runs locally over stdio, keeps models in memory, and writes files only inside a workspace directory you choose. A configured MagicaVoxel installation is accessible through restricted read-only roots.
 
+![Neon Alley, a cyberpunk street built entirely through this server and rendered by MagicaVoxel](https://raw.githubusercontent.com/KaanDRoid/voxel-mcp/master/examples/neon-alley/neon-alley-native-1920x1080.png)
+
+*Neon Alley: modeled, lit and rendered through the tools in this repository. The picture is MagicaVoxel's own Final Render at 1920x1080, not the palette preview. See [examples/neon-alley](examples/neon-alley/README.md) for the scene file and the script that builds it.*
+
 ## Features
 
 - **Models and editing**: primitives (box, sphere, cylinder, cone, pyramid, torus, line), explicit voxels, copy/paste, transforms, boolean operations, morphology (erode, dilate, smooth, hollow, outline), patterns, gradients, noise and symmetry tools.
@@ -17,11 +21,12 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 - **Palettes**: load and save MagicaVoxel palette PNGs (`import_palette_png`, `export_palette_png`), Adobe `.act` and palette-only VOX files; `remap_model_to_palette`, `quantize_model`, `sort_palette`, `find_nearest_color` and `merge_palettes` work in CIE Lab and report the color error.
 - **Export/import**: VOX, OBJ (basic or MagicaVoxel profile with `.mtl` and palette texture), PLY, STL, glTF 2.0 (embedded), PNG slices, Qubicle `.qb`, XRAW, Slab6 VOX, Sponge `.schem` (v2/v3) and legacy Minecraft `.schematic`; OBJ import with solid fill and colors, SVG import with paths, fills and transforms.
 
+- **Live application control (Windows, opt-in)**: `attach_magicavoxel_app`, `set_app_camera` and `export_native_render` drive a running MagicaVoxel window through its own console and Final Render dialog. Disabled unless `MAGICVOXEL_MCP_UI_AUTOMATION=1`; see [Live application control](#live-application-control-windows-opt-in).
 - **xs shaders**: `list_xs_shaders`, `read_xs_shader`, `validate_xs_shader`, `write_xs_shader` (workspace only), `generate_xs_shader_template` and `run_xs_shader`. Shaders are read from the workspace or from the `shader` folder of the MagicaVoxel install (`MAGICAVOXEL_HOME`, or the folder of `MAGICAVOXEL_PATH`); the install folder is never written. `run_xs_shader` uses a built-in sandboxed interpreter for a documented GLSL subset (no code is evaluated by the JavaScript engine) and is undoable. See `docs/xs-shader-evaluation.md`.
 
 ## Requirements
 
-- Node.js 22 or newer
+- Node.js 22.2 or newer
 - MagicaVoxel is optional: it is needed for `open_in_magicavoxel` and for the installation discovery tools
 
 ## Install
@@ -51,6 +56,7 @@ Point your MCP client at `dist/index.js` (see [client-config](client-config/READ
 |---|---|
 | `MAGICVOXEL_MCP_WORKSPACE` | Directory for all reads and writes. Defaults to the server's working directory. Paths that escape it, including through symlinks, are rejected. |
 | `MAGICAVOXEL_PATH` | Absolute path to `MagicaVoxel.exe` or `MagicaVoxel`, enabling `open_in_magicavoxel` and installation discovery. Takes precedence over `MAGICAVOXEL_HOME`. |
+| `MAGICVOXEL_MCP_UI_AUTOMATION` | Set to `1` to allow the live-application tools, which send real mouse and keyboard input to the MagicaVoxel window (Windows only). Off by default. |
 | `MAGICAVOXEL_HOME` | The MagicaVoxel installation folder (the one containing the executable, `config`, `vox`, `palette`, `shader` and `ibl`). Enables the discovery tools and, when `MAGICAVOXEL_PATH` is unset, `open_in_magicavoxel`. |
 
 When an installation is configured, its `vox`, `palette`, `shader` and `ibl` folders and its `config` text files become readable by absolute path (only `.vox`, `.png`, `.txt` and `.hdr` files respectively). Executables, the `cache` folder and everything else in the installation stay unreadable, and nothing in it can be written, even if it is inside the selected workspace; all writes remain confined to the workspace.
@@ -74,8 +80,26 @@ These are low-level file settings, not a normalized physical-light API. Save the
 scene and reopen it in MagicaVoxel to inspect the native result. Camera slots are
 saved presets; writing one does not select it or move an already-open viewport.
 The `render_model` PNG remains a palette-colored preview: it does not path-trace
-these materials, reflections, bloom or native render settings. The server does not
-remotely operate the application or automatically produce native renders.
+these materials, reflections, bloom or native render settings. Live camera changes and native renders are available through the opt-in tools below.
+
+## Live application control (Windows, opt-in)
+
+MagicaVoxel can be driven while it is running, with three tools. They are off unless the server is started with `MAGICVOXEL_MCP_UI_AUTOMATION=1`, they only work on Windows, and they are calibrated for MagicaVoxel 0.99.7.2 (other versions are refused unless `MAGICVOXEL_MCP_UI_ANY_VERSION=1`).
+
+1. `attach_magicavoxel_app` pins one running process. It matches the executable path from `MAGICAVOXEL_PATH`, the process id and the process start time; a window title or file name is never trusted. Start the application with `open_in_magicavoxel` first and switch it to **Render mode**.
+2. `set_app_camera` types the application's own console commands `cam x/y/z`, `cam zoom`, `cam fov` and `cam rx/ry/rz` (absolute values, angles in degrees; a negative `rx` looks down from above). `focus: true` first runs `cam focus`, which re-frames the whole scene. `zoom` was not calibrated and is not a linear distance: a small value can move the camera far into the scene, so start with `focus` and check the result.
+3. `export_native_render` sets the Photo size, clicks the application's own Render button, enters the output path in the save dialog that this click opened and waits. It returns only when the PNG exists, has stopped changing, is a regular file inside the workspace that was written during this call, passes structure and checksum checks, and has the requested size (`imageWidth`, `imageHeight`, 1..12000). It never overwrites a file, and the path must be plain (absolute, no `% * ? " < > |`).
+
+What the tools guarantee, and what they do not:
+
+- Before every single key press and click the helper checks that the pinned process owns the foreground, and before each click that the window under the cursor belongs to it. If another window takes the foreground, or the mouse is moved, input stops with an error. There is also a time budget, and modifier keys are released on failure. A check cannot be atomic with the input event, so a window that appears in that instant can still receive one event: do not use the computer while a call runs (a few seconds, plus the render).
+- Focus is moved with thread attachment, not with synthetic keys, so nothing is sent to the window that was in front.
+- The console is not cleared with Backspace. The text goes into the console field as keystrokes, so the application must really be in Render mode: in the model editor the typed letters are editing shortcuts. The tools cannot check the mode.
+- The process identity and the finished file are verified. A camera command is only reported as submitted, because the application does not report its camera back.
+- Click positions (Image tab, Render button, console) are relative to the window and the `ui_scale` setting; they were calibrated on one layout. If the save dialog does not appear, the call fails instead of guessing. An application running as administrator cannot receive the input, and the call reports that.
+- The foreground check compares the process, not one specific window: an unexpected MagicaVoxel message box that has focus would receive the typed text. The save dialog is recognised as a new dialog of the pinned process, not by its title or controls.
+- Bringing the window to the front visibly interrupts whatever you are doing, and other tools wait while a render runs.
+- Only one live operation runs at a time. Final renders take as long as the application needs.
 
 ## Limits
 
@@ -126,7 +150,7 @@ npm run check       # typecheck, tests and npm audit
 - SVG import is fill-only: strokes, text, gradients, CSS classes, clipping, opacity, `use` and elliptical arcs raise an "unsupported SVG" error.
 - GIF frames are limited to 255 opaque colors with on/off transparency; use `quantize: "median-cut"` (and optionally `dither: "floyd"`) to reduce colors instead of failing.
 - OBJ, PLY, MC-style and other MagicaVoxel exports have not been compared against the application's own output (parity unverified).
-- MagicaVoxel is launched with a file but is not remotely controlled.
+- MagicaVoxel has no documented command-line or RPC interface. Live control (Windows only, opt-in) types into its own console and clicks its native dialog, so it needs the window in Render mode and cannot read the application state back.
 
 ## License
 
