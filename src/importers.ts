@@ -1,6 +1,7 @@
 import fs from "fs";
 import nodePath from "path";
 import { PNG } from "pngjs";
+import { readPngBounded } from "./png.js";
 import { ColorMatcher, parseCssColor, unpackRGBA, type RGB } from "./color.js";
 import { invertAxis, parseAxis } from "./formats/axes.js";
 import { indexColors } from "./formats/common.js";
@@ -157,7 +158,14 @@ export function importOBJData(text: string, opts: ObjImportOptions): ObjImportRe
   for (const lib of libs) {
     const data = safeAux(opts.readAux, lib);
     if (!data) { warnings.push(`Material library ${lib} was not found or could not be read`); continue; }
-    for (const [k, v] of parseMtl(data.toString("utf8"))) materials.set(k, v);
+    for (const [k, v] of parseMtl(data.toString("utf8"))) {
+      if (v.map && !/^(?:[\\/]|[A-Za-z]:)/.test(v.map)) {
+        // Texture paths are relative to the material library, not to the mesh.
+        const library = lib.replaceAll("\\", "/");
+        v.map = nodePath.posix.normalize(nodePath.posix.join(nodePath.posix.dirname(library), v.map.replaceAll("\\", "/")));
+      }
+      materials.set(k, v);
+    }
   }
   const textureFailures = new Set<string>();
   if (useColor) {
@@ -167,7 +175,7 @@ export function importOBJData(text: string, opts: ObjImportOptions): ObjImportRe
       if (!bytes) { textureFailures.add(mat.map); continue; }
       try {
         if (bytes.length < 24 || bytes.readUInt32BE(16) * bytes.readUInt32BE(20) > MAX_TEXTURE_PIXELS) throw new Error("texture too large");
-        const png = PNG.sync.read(bytes);
+        const png = readPngBounded(bytes, { maxPixels: MAX_TEXTURE_PIXELS });
         mat.tex = { w: png.width, h: png.height, data: png.data };
       } catch { textureFailures.add(mat.map); }
     }

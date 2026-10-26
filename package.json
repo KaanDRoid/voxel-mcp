@@ -4,7 +4,7 @@
   "description": "Local MCP server for voxel modeling, MagicaVoxel scenes, previews, and asset conversion.",
   "main": "dist/index.js",
   "bin": { "magicvoxel-mcp": "dist/index.js" },
-  "files": ["dist", "client-config", "README.md", "LICENSE"],
+  "files": ["dist", "client-config", "docs", "README.md", "CHANGELOG.md", "LICENSE"],
   "engines": { "node": ">=22" },
   "repository": { "type": "git", "url": "git+https://github.com/KaanDRoid/voxel-mcp.git" },
   "bugs": { "url": "https://github.com/KaanDRoid/voxel-mcp/issues" },

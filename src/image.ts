@@ -1,4 +1,5 @@
 import fs from "fs";
+import { readPngBounded } from "./png.js";
 import path from "path";
 import { defaultPalette, type VoxModelData } from "./vox.js";
 
@@ -26,8 +27,8 @@ export async function loadImage(filePath: string): Promise<ImageData> {
   const buf = readImageBuffer(filePath);
   let img: ImageData;
   if (ext === ".png") {
-    const { PNG } = await import("pngjs");
-    img = PNG.sync.read(buf);
+
+    img = readPngBounded(buf);
   } else if (ext === ".jpg" || ext === ".jpeg") {
     const jpeg = await import("jpeg-js");
     img = jpeg.decode(buf, { useTArray: true, maxResolutionInMP: 4, maxMemoryUsageInMB: 128 });

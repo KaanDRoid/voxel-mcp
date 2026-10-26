@@ -46,7 +46,7 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
           const limits: Record<string, number> = { sizeX: 256, sizeY: 256, sizeZ: 256, r: 256, majorR: 256, minorR: 256, height: 256, thickness: 256, amount: 256, floors: 32, iterations: 16, steps: 60, octaves: 8, fps: 120, durationMs: 600000 };
           for (const [key, value] of Object.entries(parameters)) {
             if (typeof value === "number" && (!Number.isFinite(value) || (limits[key] !== undefined && value > limits[key]!))) throw new Error(`${key} exceeds the supported limit`);
-            if (typeof value === "string" && value.length > 4096) throw new Error(`${key} exceeds the string limit`);
+            if (typeof value === "string" && value.length > (key === "source" ? 256 * 1024 : 4096)) throw new Error(`${key} exceeds the string limit`);
             if (Array.isArray(value) && value.length > 262144) throw new Error(`${key} exceeds the array limit`);
             if (/^(x[01]?|y[01]?|z[01]?|c[xyz]|d[xyz]|offset[XYZ])$/.test(key) && typeof value === "number" && Math.abs(value) > 4096) throw new Error(`${key} exceeds the coordinate limit`);
             if (typeof value === "string" && ["path", "folder", "frontPath", "sidePath", "topPath"].includes(key)) {

@@ -9,6 +9,8 @@
  * See docs/xs-shader-evaluation.md for the supported subset.
  */
 
+import { defaultPalette } from "./vox.js";
+
 type Val = number | boolean | number[];
 type Frame = Val[];
 type Ev = (f: Frame) => Val;
@@ -728,10 +730,11 @@ export function runXsOnVolume(program: XsProgram, model: { sizeX: number; sizeY:
   const before = new Uint8Array(total);
   const at = (x: number, y: number, z: number) => x + sizeX * (y + sizeY * z);
   for (const v of model.voxels) before[at(v.x, v.y, v.z)] = v.i;
+  const palette = model.palette ?? defaultPalette();
   const map = program.instantiate({
     volumeSize: [sizeX, sizeY, sizeZ], colorIndex: options.colorIndex, selections: options.selections, args: options.args,
     voxelAt: (x, y, z) => (x >= 0 && y >= 0 && z >= 0 && x < sizeX && y < sizeY && z < sizeZ ? before[at(x, y, z)]! : 0),
-    ...(model.palette ? { paletteAt: (i: number) => Number(model.palette![i] ?? 0) } : {}),
+    paletteAt: (i: number) => Number(palette[i] ?? 0),
   });
   const start = Date.now(), deadline = start + options.timeLimitMs;
   const voxels: XsRunResult["voxels"] = [];

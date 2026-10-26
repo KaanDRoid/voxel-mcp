@@ -1,4 +1,5 @@
 import { PNG } from "pngjs";
+import { readPngBounded } from "./png.js";
 import { packRGBA, unpackRGBA } from "./color.js";
 import { decodeVOXDocument, encodeVOXDocument, type VoxChunk } from "./vox.js";
 
@@ -9,7 +10,7 @@ import { decodeVOXDocument, encodeVOXDocument, type VoxChunk } from "./vox.js";
 const slotToIndex = (slot: number) => (slot + 1) & 255;
 
 export function paletteFromPng(buf: Buffer): Uint32Array {
-  const png = PNG.sync.read(buf);
+  const png = readPngBounded(buf, { minPixels: 256, maxPixels: 256, maxInputBytes: 1024 * 1024 });
   if (png.width * png.height < 256) throw new Error("Palette PNG must contain at least 256 pixels (MagicaVoxel uses 256x1)");
   const out = new Uint32Array(256);
   for (let slot = 0; slot < 256; slot++) {

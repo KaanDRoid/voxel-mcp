@@ -6,7 +6,7 @@ import path from 'node:path';
 import { PNG } from 'pngjs';
 import { renderFrameToPNG, exportAnimationGIF, gifFrameIndices, exportAnimationFrames, exportAnimationSpriteSheet, interpolateFrames } from '../src/animation.js';
 import type { VoxModelData } from '../src/vox.js';
-const palette = new Uint32Array(256); palette[1] = 0xffff0000; palette[200] = 0xff00ff00;
+const palette = new Uint32Array(256); palette[1] = 0xff0000ff; palette[200] = 0xff00ff00;
 const frame: VoxModelData = {sizeX:2,sizeY:3,sizeZ:4,palette,voxels:[{x:0,y:0,z:0,i:200},{x:0,y:0,z:3,i:1}]};
 const pixel = (png: ReturnType<typeof renderFrameToPNG>,x:number,y:number) => [...png.data.subarray((y*png.width+x)*4,(y*png.width+x)*4+4)];
 // Minimal independent GIF parser/LZW decoder: assertions inspect encoded pixels, not file existence.
@@ -32,7 +32,7 @@ function decodeGIF(bytes: Buffer) {
 }
 const temp = () => fs.mkdtempSync(path.join(process.env.TMPDIR ?? os.tmpdir(),'voxel-animation-'));
 test('interpolation is deterministic coordinate crossfade preserving actual source colors', () => {
- const bPalette=new Uint32Array(palette);bPalette[1]=0xff0000ff;
+ const bPalette=new Uint32Array(palette);bPalette[1]=0xffff0000;
  const a={...frame,voxels:[{x:0,y:0,z:0,i:1}]}; const b={...frame,palette:bPalette,voxels:[{x:0,y:0,z:0,i:1},{x:1,y:1,z:1,i:200}]};
  const result=interpolateFrames(a,b,7);assert.equal(result.length,7);
  assert.deepEqual(result,interpolateFrames(a,b,7));
@@ -89,7 +89,7 @@ test('isometric bounds include tall columns, and depth occludes independent of i
  assert.deepEqual(PNG.sync.write(png),PNG.sync.write(renderFrameToPNG({...f,voxels:f.voxels.toReversed()},'isometric')));
 });
 
-test('orthographic projection uses actual axes, nearest depth and ARGB palette', () => {
+test('orthographic projection uses actual axes, nearest depth and little-endian RGBA palette', () => {
  const top = PNG.sync.read(PNG.sync.write(renderFrameToPNG(frame,'top')));
  assert.deepEqual([top.width,top.height],[2,3]); assert.deepEqual(pixel(top,0,2),[255,0,0,255]);
  const front = renderFrameToPNG(frame,'front'); assert.deepEqual([front.width,front.height],[2,4]); assert.deepEqual(pixel(front,0,0),[255,0,0,255]);

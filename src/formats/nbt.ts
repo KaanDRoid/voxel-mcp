@@ -57,15 +57,19 @@ export function writeNbt(rootName: string, root: Record<string, NbtValue>): Buff
 }
 
 const MAX_DEPTH = 32;
+export const NBT_LIMITS = { maxBytes: 64 * 1024 * 1024, maxNodes: 100_000, maxArrayElements: 1_000_000, maxAllocatedBytes: 64 * 1024 * 1024 } as const;
 
 /** Parses an uncompressed NBT document into plain values: byte/short/int/float/double -> number, long -> bigint,
  * byte array -> Buffer, int array -> number[], long array -> bigint[], list -> array, compound -> object. */
 export function readNbt(buf: Buffer): { name: string; value: Record<string, unknown> } {
-  let p = 0;
+  if (buf.length > NBT_LIMITS.maxBytes) throw new Error("NBT input size limit exceeded");
+  let p = 0, nodes = 0, allocatedBytes = 0;
+  const allocate = (bytes: number) => { if (!Number.isSafeInteger(bytes) || bytes < 0 || (allocatedBytes += bytes) > NBT_LIMITS.maxAllocatedBytes) throw new Error("NBT allocation budget exceeded"); };
   const need = (n: number) => { if (n < 0 || p + n > buf.length) throw new Error("NBT data is truncated or declares an invalid length"); };
-  const readString = () => { need(2); const n = buf.readUInt16BE(p); p += 2; need(n); const s = buf.toString("utf8", p, p + n); p += n; return s; };
-  const length = (unit: number) => { need(4); const n = buf.readInt32BE(p); p += 4; if (n < 0 || n * unit > buf.length - p) throw new Error("NBT data is truncated or declares an invalid length"); return n; };
+  const readString = () => { need(2); const n = buf.readUInt16BE(p); p += 2; need(n); allocate(n * 2); const s = buf.toString("utf8", p, p + n); p += n; return s; };
+  const length = (unit: number, max: number = NBT_LIMITS.maxArrayElements) => { need(4); const n = buf.readInt32BE(p); p += 4; if (n < 0 || n * unit > buf.length - p) throw new Error("NBT data is truncated or declares an invalid length"); if (n > max) throw new Error("NBT collection limit exceeded"); return n; };
   const read = (type: number, depth: number): unknown => {
+    if (++nodes > NBT_LIMITS.maxNodes) throw new Error("NBT node budget exceeded");
     if (depth > MAX_DEPTH) throw new Error("NBT nesting is too deep");
     switch (type) {
       case T.byte: need(1); return buf.readInt8(p++);
@@ -75,16 +79,19 @@ export function readNbt(buf: Buffer): { name: string; value: Record<string, unkn
       case T.float: need(4); p += 4; return buf.readFloatBE(p - 4);
       case T.double: need(8); p += 8; return buf.readDoubleBE(p - 8);
       case T.string: return readString();
-      case T.byteArray: { const n = length(1); const out = Buffer.from(buf.subarray(p, p + n)); p += n; return out; }
-      case T.intArray: { const n = length(4); const out: number[] = []; for (let i = 0; i < n; i++) { out.push(buf.readInt32BE(p)); p += 4; } return out; }
-      case T.longArray: { const n = length(8); const out: bigint[] = []; for (let i = 0; i < n; i++) { out.push(buf.readBigInt64BE(p)); p += 8; } return out; }
+      case T.byteArray: { const n = length(1, NBT_LIMITS.maxBytes); allocate(n); const out = Buffer.from(buf.subarray(p, p + n)); p += n; return out; }
+      case T.intArray: { const n = length(4); allocate(n * 8); const out: number[] = []; for (let i = 0; i < n; i++) { out.push(buf.readInt32BE(p)); p += 4; } return out; }
+      case T.longArray: { const n = length(8); allocate(n * 32); const out: bigint[] = []; for (let i = 0; i < n; i++) { out.push(buf.readBigInt64BE(p)); p += 8; } return out; }
       case T.list: {
         need(1); const elementType = buf[p++]!; const n = length(1);
         if (n > 0 && (elementType < 1 || elementType > 12)) throw new Error("NBT list has an invalid element type");
+        if (n > NBT_LIMITS.maxNodes - nodes) throw new Error("NBT node budget exceeded");
+        allocate(n * 8);
         const out: unknown[] = []; for (let i = 0; i < n; i++) out.push(read(elementType, depth + 1)); return out;
       }
       case T.compound: {
-        const out: Record<string, unknown> = {};
+        allocate(64);
+        const out: Record<string, unknown> = Object.create(null);
         for (;;) {
           need(1); const childType = buf[p++]!;
           if (childType === 0) return out;

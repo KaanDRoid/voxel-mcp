@@ -25,7 +25,7 @@ test('NBT writer and reader agree on every tag type and reject malformed data', 
   assert.equal(bytes[0], 10);
   const back = readNbt(bytes);
   assert.equal(back.name, 'root');
-  assert.deepEqual(back.value, { b: -3, s: -300, i: 70000, l: 2n ** 40n, f: 1.5, d: 2.25, str: 'h\u00e9llo', ba: Buffer.from([1, 2, 3]), ia: [1, -2], la: [5n], list: [1, 2], sub: { x: 9 } });
+  assert.deepEqual({ ...back.value, sub: { ...(back.value.sub as Record<string, unknown>) } }, { b: -3, s: -300, i: 70000, l: 2n ** 40n, f: 1.5, d: 2.25, str: 'h\u00e9llo', ba: Buffer.from([1, 2, 3]), ia: [1, -2], la: [5n], list: [1, 2], sub: { x: 9 } });
   assert.throws(() => readNbt(bytes.subarray(0, bytes.length - 4)), /truncated|NBT/i);
   assert.throws(() => readNbt(Buffer.from([1, 0, 0])), /NBT/);
   assert.throws(() => readNbt(Buffer.from([10, 0, 0, 7, 0, 1, 0x61, 0x7f, 0xff, 0xff, 0xff])), /NBT|length/i);

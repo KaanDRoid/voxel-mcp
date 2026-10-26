@@ -106,7 +106,7 @@ const KNOWN: Map<string, RGB> = new Map(defaultBlockTable("both").map(b => [b.bl
  * option (block id without state -> CSS color), or a stable hash color (reported in `warnings`). */
 export function decodeSchem(file: Buffer, opts: { colors?: Record<string, string> | undefined } = {}): { model: VoxModelData; warnings: string[] } {
   let raw: Buffer;
-  try { raw = gunzipSync(file, { maxOutputLength: 256 * 1024 * 1024 }); } catch { throw new Error("Not a gzip-compressed schematic file"); }
+  try { raw = gunzipSync(file, { maxOutputLength: 64 * 1024 * 1024 }); } catch { throw new Error("Not a gzip-compressed schematic file"); }
   const root = readNbt(raw).value;
   const body = (root.Schematic && typeof root.Schematic === "object" && !Buffer.isBuffer(root.Schematic) ? root.Schematic : root) as Record<string, unknown>;
   const version = body.Version;

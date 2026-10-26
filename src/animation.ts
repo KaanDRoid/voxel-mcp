@@ -196,10 +196,10 @@ function checkFrameSizes(frames: VoxModelData[]) {
   if (frames.some(f=>f.sizeX!==first.sizeX || f.sizeY!==first.sizeY || f.sizeZ!==first.sizeZ)) throw new Error("frame sizes differ");
 }
 
-/** Model colors are packed ARGB; index zero denotes empty space. */
+/** Model colors are packed little-endian RGBA (0xAABBGGRR); index zero denotes empty space. */
 export function voxelColor(frame: VoxModelData, index: number): [number, number, number, number] {
   const c = (frame.palette ?? FALLBACK_PALETTE)[index] ?? 0;
-  return [(c >>> 16) & 255, (c >>> 8) & 255, c & 255, (c >>> 24) & 255];
+  return [c & 255, (c >>> 8) & 255, (c >>> 16) & 255, (c >>> 24) & 255];
 }
 function validVoxel(frame: VoxModelData, v: VoxModelData["voxels"][number]): boolean {
   return v.i > 0 && [v.x, v.y, v.z].every(Number.isInteger) && v.x >= 0 && v.x < frame.sizeX && v.y >= 0 && v.y < frame.sizeY && v.z >= 0 && v.z < frame.sizeZ;

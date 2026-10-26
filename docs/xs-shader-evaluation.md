@@ -65,11 +65,12 @@ Semantics chosen where the GLSL specification or MagicaVoxel is silent:
 Exceeding a limit is an error and the model is left untouched (the run happens
 inside a registry transaction, so success is undoable with `undo`).
 
-The interpreter runs on the server thread rather than in a worker thread. The
-step, loop and time limits bound every run, there is no way to block
-indefinitely, and a worker would add a build-layout dependency (a separate
-compiled entry point) for no additional guarantee. Requests are already
-serialized by the tool wrapper.
+Evaluation runs in a dedicated worker thread (`src/xsWorker.ts`). The protocol
+thread remains responsive to pings while model-changing tools stay serialized.
+A parent-side deadline terminates a slow or unresponsive worker; each worker
+also has a 512 MiB V8 old-generation limit. Successful output is committed only
+after evaluation finishes, so timeout and worker failures leave the model intact.
+The existing per-voxel interpreter limits remain in force inside the worker.
 
 ## Measurements
 

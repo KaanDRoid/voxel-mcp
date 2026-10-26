@@ -65,6 +65,7 @@ export function registerInstallTools(options: { server: McpServer; register: Reg
   };
   const need = (): MagicaInstall => { if (!install) throw unavailable(); return install; };
   if (install) {
+    files.protectRoot(install.root);
     for (const root of installReadRoots(install)) files.addReadRoot(root.dir, { allowExt: root.allowExt });
     if (!config.getMagicaPath()) config.setMagicaPath(install.exe);
   }

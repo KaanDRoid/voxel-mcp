@@ -5,7 +5,7 @@ import type { CallToolResult } from "@modelcontextprotocol/server";
 import { ModelRegistry, MAX_VOXELS, mutateModel } from "./model.js";
 import { FilePolicy } from "./files.js";
 import { MagicaConfig } from "./magicaConfig.js";
-import { compileXs, runXsOnVolume } from "./xsEval.js";
+import { runXsInWorker } from "./xsWorker.js";
 import { installShaderDir, listShaders, readInstalledShader, readLimited, validateXsSource, XS_MAX_BYTES, BUILTIN_ARGS, BUILTIN_FUNCTIONS } from "./xsShader.js";
 import { generateXsTemplate, XS_TEMPLATE_KINDS } from "./xsTemplates.js";
 
@@ -117,8 +117,8 @@ export function registerXsTools(register: RegisterTool, registry: ModelRegistry,
       values[k] = val;
     }
     const colorIndex = a.colorIndex ?? 1;
-    const program = compileXs(source, v.header.args.map(x => x.var));
-    const result = runXsOnVolume(program, model, { args: values, colorIndex, selections: a.selections ?? [colorIndex], mode: a.mode ?? "replace", timeLimitMs: a.timeLimitMs ?? 20000 }, MAX_VOXELS);
+
+    const result = await runXsInWorker({ source, argumentNames: v.header.args.map(x => x.var), model, options: { args: values, colorIndex, selections: a.selections ?? [colorIndex], mode: a.mode ?? "replace", timeLimitMs: a.timeLimitMs ?? 20000 }, maxVoxels: MAX_VOXELS });
     mutateModel(model, draft => { draft.voxels = result.voxels; });
     return text({ id: a.id, voxels: result.filled, changed: result.changed, elapsedMs: result.elapsedMs });
   });

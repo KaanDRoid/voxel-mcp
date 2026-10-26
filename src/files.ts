@@ -9,6 +9,17 @@ export class FilePolicy {
     if (!fs.statSync(this.root).isDirectory()) throw new Error("Workspace must be a directory");
   }
 
+  private readonly protectedRoots: string[] = [];
+
+  /** Keep application data read-only even if it is nested inside the selected workspace. */
+  protectRoot(dir: string): void {
+    this.protectedRoots.push(fs.realpathSync(path.resolve(dir)));
+  }
+
+  private assertNotProtected(candidate: string): void {
+    if (this.protectedRoots.some(root => FilePolicy.isInside(root, candidate))) throw new Error("Application installation is read-only");
+  }
+
   private readonly readRoots: { dir: string; allowExt: Set<string> }[] = [];
 
   private static isInside(base: string, candidate: string): boolean {
@@ -49,10 +60,12 @@ export class FilePolicy {
     if (process.platform === "win32" && /:/.test(value.replace(/^[A-Za-z]:[\\/]/, ""))) throw new Error("Invalid file path");
     if (process.platform === "win32" && value.split(/[\\/]/).some(part => /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(part))) throw new Error("Reserved device name");
     const candidate = path.resolve(this.root, value);
-    if (mode === "read" && path.isAbsolute(value) && !FilePolicy.isInside(this.root, candidate)) {
+    const protectedPath = this.protectedRoots.some(root => FilePolicy.isInside(root, candidate));
+    if (mode === "read" && path.isAbsolute(value) && (!FilePolicy.isInside(this.root, candidate) || protectedPath)) {
       const viaRoot = this.resolveReadRoot(candidate);
       if (viaRoot) return viaRoot;
     }
+    this.assertNotProtected(candidate);
     this.assertInside(candidate);
     let existing = candidate;
     while (!fs.existsSync(existing)) {
@@ -62,6 +75,7 @@ export class FilePolicy {
       if (parent === existing) throw new Error("No existing workspace ancestor");
       existing = parent;
     }
+    this.assertNotProtected(fs.realpathSync(existing));
     this.assertInside(fs.realpathSync(existing));
     if (mode === "read") {
       const stat = fs.statSync(candidate);

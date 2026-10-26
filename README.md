@@ -1,6 +1,6 @@
 # magicvoxel-mcp
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server for procedural voxel modeling and MagicaVoxel (`.vox`) file workflows. It runs locally over stdio, keeps models in memory, and reads and writes files only inside a workspace directory you choose.
+A [Model Context Protocol](https://modelcontextprotocol.io) server for procedural voxel modeling and MagicaVoxel (`.vox`) file workflows. It runs locally over stdio, keeps models in memory, and writes files only inside a workspace directory you choose. A configured MagicaVoxel installation is accessible through restricted read-only roots.
 
 ## Features
 
@@ -53,7 +53,7 @@ Point your MCP client at `dist/index.js` (see [client-config](client-config/READ
 | `MAGICAVOXEL_PATH` | Absolute path to `MagicaVoxel.exe` or `MagicaVoxel`, enabling `open_in_magicavoxel` and installation discovery. Takes precedence over `MAGICAVOXEL_HOME`. |
 | `MAGICAVOXEL_HOME` | The MagicaVoxel installation folder (the one containing the executable, `config`, `vox`, `palette`, `shader` and `ibl`). Enables the discovery tools and, when `MAGICAVOXEL_PATH` is unset, `open_in_magicavoxel`. |
 
-When an installation is configured, its `vox`, `palette`, `shader` and `ibl` folders and its `config` text files become readable by absolute path (only `.vox`, `.png`, `.txt` and `.hdr` files respectively). Executables, the `cache` folder and everything else in the installation stay unreadable, and nothing in it can be written; all writes remain confined to the workspace.
+When an installation is configured, its `vox`, `palette`, `shader` and `ibl` folders and its `config` text files become readable by absolute path (only `.vox`, `.png`, `.txt` and `.hdr` files respectively). Executables, the `cache` folder and everything else in the installation stay unreadable, and nothing in it can be written, even if it is inside the selected workspace; all writes remain confined to the workspace.
 
 `open_in_magicavoxel` only opens `.vox` files and starts the application with the installation folder as its working directory.
 
@@ -66,7 +66,12 @@ When an installation is configured, its `vox`, `palette`, `shader` and `ibl` fol
 
 Models are at most 256 voxels per axis (the VOX limit) and 2,000,000 voxels each. The registry holds up to 64 models and 8,000,000 voxels with a bounded undo history. Input files are limited to 64 MiB; images to 32 MiB and about 4.2 million pixels. Oversized or malformed input returns a tool error.
 
-xs shader runs are limited to 200,000 interpreter steps per voxel, 4,096 iterations per loop, shader sources of 64 KiB and a wall-clock limit (default 20 s, at most 120 s). Dense shaders with long loops (for example the shipped Mandelbulb) take about a minute at 128^3 and are best run on smaller volumes.
+xs shader runs are limited to 200,000 interpreter steps per voxel, 4,096 iterations per loop, shader sources of 64 KiB and a wall-clock limit (default 20 s, at most 120 s). Evaluation runs in a worker thread so it cannot block protocol pings, and timeout leaves the model unchanged. Dense shaders with long loops (for example the shipped Mandelbulb) take about a minute at 128^3 and are best run on smaller volumes.
+
+Palette PNG imports require exactly 256 pixels (for example 256x1 or 16x16).
+PNG dimensions and inflated scanline sizes are checked before decoding, including
+interlaced files. Schematic NBT input is limited to 64 MiB after decompression,
+100,000 parsed nodes and a 64 MiB estimated allocation budget.
 
 ## Conventions
 
