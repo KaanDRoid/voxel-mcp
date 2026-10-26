@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-26
+
 ### Added
 
 - Opt-in live control of a running MagicaVoxel window on Windows (`MAGICVOXEL_MCP_UI_AUTOMATION=1`): `attach_magicavoxel_app` pins a process by executable path, id and start time; `set_app_camera` sends the application's console camera commands; `export_native_render` runs the native Final Render and returns only after the PNG has been verified.
