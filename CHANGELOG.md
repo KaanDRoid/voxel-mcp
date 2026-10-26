@@ -3,6 +3,26 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Tools `get_magicavoxel_info`, `list_magicavoxel_samples`, `list_magicavoxel_palettes`, `list_magicavoxel_shaders`, `list_magicavoxel_ibl` and `load_magicavoxel_sample` (read-only discovery of a MagicaVoxel installation).
+- `MAGICAVOXEL_HOME` environment variable; the installation folder is resolved from it or from `MAGICAVOXEL_PATH`.
+- Read-only access to the installation's `vox`, `palette`, `shader`, `ibl` and `config` text files by absolute path, without weakening workspace confinement for writes.
+- Resources `magicavoxel://install`, `magicavoxel://samples`, `magicavoxel://palettes`, `magicavoxel://shaders`.
+- Read-only `config.txt` parser (the `$` folder convention, `workspace` entries, `io_*` export settings).
+- Tool-name snapshot test and `docs/baseline.md`.
+
+### Changed
+
+- `magicavoxel:samples` and `magicavoxel:palettes` (deprecated, use the new URIs) now read the installation instead of the workspace.
+- `open_in_magicavoxel` only opens `.vox` files, starts the application in its installation folder and reports `MAGICAVOXEL_PATH` when unconfigured.
+
+### Fixed
+
+- `set_scene_material` accepts material id 256.
+
 ## [1.2.0]
 
 ### Changed

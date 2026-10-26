@@ -16,10 +16,11 @@ import { AnimationRegistry, exportAnimationSpriteSheet, exportAnimationGIF, inte
 import { autoUvColor, detectSymmetry, makeSymmetric, simplifyModel, voxelizeText } from "./smart.js";
 import path from "path";
 import fs from "fs";
-import { spawn } from "child_process";
 import { PNG } from "pngjs";
 import { FilePolicy } from "./files.js";
 import { registerSceneTools } from "./sceneTools.js";
+import { INSTALL_READ_ONLY_TOOLS, registerInstallTools } from "./installTools.js";
+import { openVoxFile } from "./openApp.js";
 
 // Clipboard for copy/paste operations
 
@@ -28,7 +29,7 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   const clipboard: { voxels: { x: number; y: number; z: number; i: number }[] } = { voxels: [] };
   const files = new FilePolicy();
   let pending: Promise<unknown> = Promise.resolve();
-  const readOnly = new Set(["list_models", "get_model_info", "measure_distance", "get_surface_area", "get_volume", "find_center", "get_dimensions", "count_colors", "detect_symmetry", "render_model", "copy_region", "list_scenes", "get_scene_info"]);
+  const readOnly = new Set(["list_models", "get_model_info", "measure_distance", "get_surface_area", "get_volume", "find_center", "get_dimensions", "count_colors", "detect_symmetry", "render_model", "copy_region", "list_scenes", "get_scene_info", ...INSTALL_READ_ONLY_TOOLS]);
   function registerTool<T extends z.ZodRawShape>(definition: { name: string; description: string; inputSchema: z.ZodObject<T> }, handler: (args: z.infer<z.ZodObject<T>>) => Promise<CallToolResult>) {
     const { name, ...schema } = definition;
     server.registerTool(name, { ...schema, annotations: { readOnlyHint: readOnly.has(name), destructiveHint: !readOnly.has(name), openWorldHint: name === "open_in_magicavoxel" } }, async args => {
@@ -1345,34 +1346,16 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   registerTool(
     {
       name: "open_in_magicavoxel",
-      description: "Open a .vox file in MagicaVoxel.exe",
+      description: "Open a .vox file in MagicaVoxel (requires MAGICAVOXEL_PATH or MAGICAVOXEL_HOME)",
       inputSchema: z.object({ path: z.string() }).strict(),
     },
     async (args) => {
-      const exe = config.getMagicaPath();
-      if (!exe) throw new Error("MagicaVoxel executable not configured; set the MAGICAVOXEL_PATH environment variable.");
-      const p = args.path as string;
-      const abs = path.isAbsolute(p) ? p : path.join(process.cwd(), p);
-      if (!fs.existsSync(abs)) throw new Error(`File not found: ${abs}`);
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(exe, [abs], { detached: true, stdio: "ignore", shell: false });
-        child.once("error", reject);
-        child.once("spawn", () => { child.unref(); resolve(); });
-      });
-      return { content: [{ type: "text", text: `opened in MagicaVoxel: ${abs}` }] };
+      const opened = await openVoxFile({ exe: config.getMagicaPath(), file: args.path as string });
+      return { content: [{ type: "text", text: `opened in MagicaVoxel: ${opened}` }] };
     }
   );
 
-  for (const [name, uri, folder, extension] of [
-    ["samples", "magicavoxel:samples", "vox", ".vox"],
-    ["palettes", "magicavoxel:palettes", "palette", ".png"]
-  ] as const) {
-    server.registerResource(name, uri, { mimeType: "application/json", description: `Available ${name} in workspace/${folder}` }, async resourceUri => {
-      const candidate = path.join(files.root, folder);
-      const entries = fs.existsSync(candidate) ? fs.readdirSync(files.resolve(folder, "directory")).filter(f => f.toLowerCase().endsWith(extension)) : [];
-      return { contents: [{ uri: resourceUri.href, mimeType: "application/json", text: JSON.stringify(entries) }] };
-    });
-  }
+  registerInstallTools({ server, register: registerTool, registry, files, config });
 }
 
 // ===== HELPER FUNCTIONS FOR CHARACTER DESCRIPTIONS =====
