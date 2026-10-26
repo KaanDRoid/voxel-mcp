@@ -8,8 +8,9 @@ round-trip test is not evidence of live application control or complete parity.
 
 | Area | Roadmap tasks | Status |
 | --- | --- | --- |
-| Tool catalog baseline and naming snapshot | P0-2 | Implemented; the current snapshot contains 153 unique tools. |
-| Application launch validation | P0-3 | Mock-spawn tests pass; only .vox files are accepted and the working directory is the installation folder. The real application has not been launched. |
+| Tool catalog baseline and naming snapshot | P0-2 | Implemented; the current snapshot contains 155 unique tools. |
+| Application launch validation | P0-3 | Mock-spawn tests pass; only .vox files are accepted and the working directory is the installation folder. A generated scene has also been opened and rendered in a separate copy of the application; the original install was unchanged. |
+| Low-level render and camera setters | P4 | Native rOBJ settings and rCAM slots 0..9 can be merged and saved; this is not renderer automation or a physical-light API. |
 | Material id range | P0-5 | Material ids 1..256 are accepted. The interpretation of id 256 remains unverified in the application. |
 | Installation discovery, configuration and read-only roots | P1-1, P1-2, P1-3, P1-4 | Implemented. The installation is protected even if it is inside the workspace. |
 | Corpus and typed VOX chunks | P0-4, P2-1, P2-2 | All 15 installed sample files decode strictly and round-trip byte-for-byte. Synthetic fixtures cover CI without redistributing application assets. |
@@ -51,10 +52,10 @@ models, palettes, shaders or environment images.
 
 ## Still pending
 
-- Supervised application tests: file launch, scene pivot, output parity and any
+- Further supervised application tests: general scene pivot/rotation rules, output parity and any
   feasible automation interface. No supported remote-control API is assumed.
 - Full scene/object/layer CRUD and scene undo/redo (phase 3).
-- Typed material, render and camera tools (phase 4).
+- High-level typed material/lighting/camera presets and numeric validation (phase 4); low-level native dictionary setters are implemented.
 - Native VOX animation editing and the animation-to-scene bridge (phase 5).
 - Installation-palette convenience tools and additional export parity work.
 - Preview lighting, scene rendering and turntable export (phase 10).
