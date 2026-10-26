@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `set_scene_render_object` merges native render dictionaries by type; `set_scene_camera` merges camera slots 0..9. These are low-level saved-file controls, not native renderer automation.
+
 - Tools `get_magicavoxel_info`, `list_magicavoxel_samples`, `list_magicavoxel_palettes`, `list_magicavoxel_shaders`, `list_magicavoxel_ibl` and `load_magicavoxel_sample` (read-only discovery of a MagicaVoxel installation).
 - `MAGICAVOXEL_HOME` environment variable; the installation folder is resolved from it or from `MAGICAVOXEL_PATH`.
 - Read-only access to the installation's `vox`, `palette`, `shader`, `ibl` and `config` text files by absolute path, without weakening workspace confinement for writes.

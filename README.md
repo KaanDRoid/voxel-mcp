@@ -62,6 +62,21 @@ When an installation is configured, its `vox`, `palette`, `shader` and `ibl` fol
 `magicavoxel://install`, `magicavoxel://samples`, `magicavoxel://palettes` and `magicavoxel://shaders` describe the installation. `magicavoxel:samples` and `magicavoxel:palettes` are deprecated aliases that return plain file-name lists from the installation (previously they looked in the workspace). `magicavoxel:models` and `magicavoxel:vox/{folder}` are unchanged.
 
 
+## Native material, lighting and camera metadata
+
+`set_scene_material` edits palette materials, including emissive, metal and roughness
+properties. `set_scene_render_object` merges string-valued native `rOBJ` settings
+such as `_uni` (uniform sky), `_inf` (sun), `_film` and `_bloom`.
+`set_scene_camera` creates or updates native `rCAM` slots 0..9. Unknown properties
+and unrelated scene chunks are retained; conflicting render object types are rejected.
+
+These are low-level file settings, not a normalized physical-light API. Save the
+scene and reopen it in MagicaVoxel to inspect the native result. Camera slots are
+saved presets; writing one does not select it or move an already-open viewport.
+The `render_model` PNG remains a palette-colored preview: it does not path-trace
+these materials, reflections, bloom or native render settings. The server does not
+remotely operate the application or automatically produce native renders.
+
 ## Limits
 
 Models are at most 256 voxels per axis (the VOX limit) and 2,000,000 voxels each. The registry holds up to 64 models and 8,000,000 voxels with a bounded undo history. Input files are limited to 64 MiB; images to 32 MiB and about 4.2 million pixels. Oversized or malformed input returns a tool error.

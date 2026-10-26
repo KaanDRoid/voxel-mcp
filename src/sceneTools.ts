@@ -7,6 +7,7 @@ import type { VoxScene } from "./scene.js";
 import { bakeModelInstance, flattenScene } from "./sceneBake.js";
 import { remapModelToPalette } from "./paletteRemap.js";
 import { defaultPalette } from "./vox.js";
+import { RENDER_OBJECT_TYPES } from "./voxChunks.js";
 
 type RegisterTool = <T extends z.ZodRawShape>(definition: { name: string; description: string; inputSchema: z.ZodObject<T> }, handler: (args: z.infer<z.ZodObject<T>>) => Promise<CallToolResult>) => void;
 const text = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value) }] });
@@ -143,6 +144,20 @@ export function registerSceneTools(register: RegisterTool, registry: ModelRegist
     if (layer) layer.attributes = { ...layer.attributes, ...attributes };
     else scene.layers.push({ id: layerId, attributes });
     commit(scene, sceneId); return text({ sceneId, layerId });
+  });
+  register({ name: "set_scene_render_object", description: "Create or merge low-level native rOBJ render settings by type. Properties are string-valued file metadata, not physical lighting units or renderer automation", inputSchema: z.object({ sceneId: z.string(), type: z.enum(RENDER_OBJECT_TYPES), properties: dictionary }).strict() }, async ({ sceneId, type, properties }) => {
+    if (properties._type !== undefined && properties._type !== type) throw new Error("properties._type must match the explicit render object type");
+    const scene = get(sceneId), object = scene.render.objects.find(o => o.type === type);
+    const attributes = { ...object?.attributes, ...properties, _type: type };
+    if (object) object.attributes = attributes;
+    else scene.render.objects.push({ type, attributes });
+    commit(scene, sceneId); return text({ sceneId, type });
+  });
+  register({ name: "set_scene_camera", description: "Create or merge a native rCAM camera slot (0..9) using string-valued file metadata such as _mode, _focus, _angle and _fov; does not control the native renderer", inputSchema: z.object({ sceneId: z.string(), cameraId: z.number().int().min(0).max(9), properties: dictionary }).strict() }, async ({ sceneId, cameraId, properties }) => {
+    const scene = get(sceneId), camera = scene.render.cameras.find(c => c.id === cameraId);
+    if (camera) camera.attributes = { ...camera.attributes, ...properties };
+    else scene.render.cameras.push({ id: cameraId, attributes: { ...properties } });
+    commit(scene, sceneId); return text({ sceneId, cameraId });
   });
   register({ name: "set_scene_material", description: "Create or update a palette material dictionary, such as _type, _rough and _metal. Files written by the application carry material ids 1..256; the exact mapping of id 256 to a palette slot is unverified", inputSchema: z.object({ sceneId: z.string(), index: z.number().int().min(1).max(256), properties: dictionary }).strict() }, async ({ sceneId, index, properties }) => {
     const scene = get(sceneId), material = indexScene(scene).materials.get(index);
