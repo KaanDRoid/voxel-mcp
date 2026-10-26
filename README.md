@@ -17,6 +17,8 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 - **Palettes**: load and save MagicaVoxel palette PNGs (`import_palette_png`, `export_palette_png`), Adobe `.act` and palette-only VOX files; `remap_model_to_palette`, `quantize_model`, `sort_palette`, `find_nearest_color` and `merge_palettes` work in CIE Lab and report the color error.
 - **Export/import**: VOX, OBJ (basic or MagicaVoxel profile with `.mtl` and palette texture), PLY, STL, glTF 2.0 (embedded), PNG slices, Qubicle `.qb`, XRAW, Slab6 VOX, Sponge `.schem` (v2/v3) and legacy Minecraft `.schematic`; OBJ import with solid fill and colors, SVG import with paths, fills and transforms.
 
+- **xs shaders**: `list_xs_shaders`, `read_xs_shader`, `validate_xs_shader`, `write_xs_shader` (workspace only), `generate_xs_shader_template` and `run_xs_shader`. Shaders are read from the workspace or from the `shader` folder of the MagicaVoxel install (`MAGICAVOXEL_HOME`, or the folder of `MAGICAVOXEL_PATH`); the install folder is never written. `run_xs_shader` uses a built-in sandboxed interpreter for a documented GLSL subset (no code is evaluated by the JavaScript engine) and is undoable. See `docs/xs-shader-evaluation.md`.
+
 ## Requirements
 
 - Node.js 22 or newer
@@ -59,9 +61,12 @@ When an installation is configured, its `vox`, `palette`, `shader` and `ibl` fol
 
 `magicavoxel://install`, `magicavoxel://samples`, `magicavoxel://palettes` and `magicavoxel://shaders` describe the installation. `magicavoxel:samples` and `magicavoxel:palettes` are deprecated aliases that return plain file-name lists from the installation (previously they looked in the workspace). `magicavoxel:models` and `magicavoxel:vox/{folder}` are unchanged.
 
+
 ## Limits
 
 Models are at most 256 voxels per axis (the VOX limit) and 2,000,000 voxels each. The registry holds up to 64 models and 8,000,000 voxels with a bounded undo history. Input files are limited to 64 MiB; images to 32 MiB and about 4.2 million pixels. Oversized or malformed input returns a tool error.
+
+xs shader runs are limited to 200,000 interpreter steps per voxel, 4,096 iterations per loop, shader sources of 64 KiB and a wall-clock limit (default 20 s, at most 120 s). Dense shaders with long loops (for example the shipped Mandelbulb) take about a minute at 128^3 and are best run on smaller volumes.
 
 ## Conventions
 

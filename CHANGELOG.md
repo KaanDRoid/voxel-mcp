@@ -55,6 +55,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Exports read palette colors in the correct byte order: red and blue were swapped in OBJ, PLY, glTF, slices and the legacy schematic.
 
 
+### Added
+
+- xs shader tools: `list_xs_shaders`, `read_xs_shader`, `validate_xs_shader`, `write_xs_shader`, `generate_xs_shader_template`, `run_xs_shader`.
+- Sandboxed interpreter for a documented GLSL subset of `map(vec3)`; decision record in `docs/xs-shader-evaluation.md`.
+- `MAGICAVOXEL_HOME` environment variable (read-only access to the install `shader` folder).
+
+### Changed
+
+- Output-style tools now include names starting with `write_` (workspace path policy, no undo entry).
+
+### Tests
+
+- Directory-link (junction) escape tests run on Windows; added nested, in-workspace, dangling and file-link cases.
+
+
 ## [1.2.0]
 
 ### Changed
