@@ -9,7 +9,7 @@ import { createTools } from "./tools.js";
 const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
 
 async function main() {
-  const server = new McpServer({ name: "magica-mcp", version });
+  const server = new McpServer({ name: "magicvoxel-mcp", version });
   const config = new MagicaConfig(process.env.MAGICAVOXEL_PATH);
   const registry = new ModelRegistry();
   createTools(server, registry, config);
@@ -20,6 +20,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  console.error("MagicaVoxel MCP:", error instanceof Error ? error.message : String(error));
+  console.error("magicvoxel-mcp:", error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });

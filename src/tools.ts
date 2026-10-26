@@ -3,7 +3,7 @@ import { z } from "zod";
 import { MagicaConfig } from "./magicaConfig.js";
 import { ModelRegistry, fillBox, fillSphere, fillCylinder, fillPyramid, fillCone, fillTorus, drawLine, setVoxels, translate, rotate90, booleanOp, scaleModel, cloneModel, clearRegion, copyRegion, pasteRegion, getModelInfo, cropToContent, centerModel, alignToGround, flipModel, rotateArbitrary } from "./model.js";
 import { saveVOX, loadVOX } from "./vox.js";
-import { generateHouse, generateCharacter, generateFromPrompt, imageToVoxel, generateVehicle, generateFurniture, generateWeapon, generateStructure, generateCreature, generateNature, generateAnkaraBlock, generateVenueInterior, generateVenueCharacter, generateStaff, generateCustomer } from "./generators.js";
+import { generateHouse, generateCharacter, generateFromPrompt, imageToVoxel, generateVehicle, generateFurniture, generateWeapon, generateStructure, generateCreature, generateNature, generateCityBlock, generateVenueInterior, generateVenueCharacter, generateStaff, generateCustomer } from "./generators.js";
 import type { StaffType, CustomerType } from "./generators.js";
 import { imageToVoxelColorized, silhouetteTo3D, edgeDetectToVoxel, depthMapToVoxel, multiViewToVoxel } from "./image.js";
 import { deduplicateVoxels, mirror, hollow, floodFill, applyNoise, generateTerrain, generateTree, replaceColor, applyPattern, applyGradient, randomizeSurfaceColor, erode, dilate, outline, smoothModel, extrudeFace, bevelEdges, addDetailNoise } from "./ops.js";
@@ -31,7 +31,7 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   const readOnly = new Set(["list_models", "get_model_info", "measure_distance", "get_surface_area", "get_volume", "find_center", "get_dimensions", "count_colors", "detect_symmetry", "render_model", "copy_region", "list_scenes", "get_scene_info"]);
   function registerTool<T extends z.ZodRawShape>(definition: { name: string; description: string; inputSchema: z.ZodObject<T> }, handler: (args: z.infer<z.ZodObject<T>>) => Promise<CallToolResult>) {
     const { name, ...schema } = definition;
-    server.registerTool(name, { ...schema, annotations: { readOnlyHint: readOnly.has(name), destructiveHint: !readOnly.has(name), openWorldHint: name === "open_in_magica" } }, async args => {
+    server.registerTool(name, { ...schema, annotations: { readOnlyHint: readOnly.has(name), destructiveHint: !readOnly.has(name), openWorldHint: name === "open_in_magicavoxel" } }, async args => {
       const execute = async (): Promise<CallToolResult> => {
         try {
           const parameters = { ...args } as Record<string, unknown>;
@@ -47,7 +47,7 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
               if (key === "folder" && fs.readdirSync(parameters[key] as string).some(f => fs.lstatSync(path.join(parameters[key] as string, f)).isSymbolicLink())) throw new Error("Output directory contains symbolic links");
             }
           }
-          const modelMutation = !readOnly.has(name) && !/^(export_|save_)/.test(name) && !name.includes("scene") && !name.includes("animation") && !["undo", "redo", "open_in_magica", "add_frame", "set_frame_duration", "duplicate_frame", "remove_frame", "reorder_frame", "interpolate_frames"].includes(name);
+          const modelMutation = !readOnly.has(name) && !/^(export_|save_)/.test(name) && !name.includes("scene") && !name.includes("animation") && !["undo", "redo", "open_in_magicavoxel", "add_frame", "set_frame_duration", "duplicate_frame", "remove_frame", "reorder_frame", "interpolate_frames"].includes(name);
           return modelMutation
             ? await registry.transaction(() => handler(parameters as z.infer<z.ZodObject<T>>))
             : await handler(parameters as z.infer<z.ZodObject<T>>);
@@ -902,10 +902,10 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
     }
   );
 
-  // Nightlife: Ankara-inspired city block
+  // Venue set: city block
   registerTool(
-    { name: "generate_ankara_block", description: "Generate a city block layout inspired by Ankara (roads + buildings)", inputSchema: z.object({ sizeX: z.number().int().positive(), sizeY: z.number().int().positive(), sizeZ: z.number().int().positive(), roads: z.boolean().optional(), seed: z.number().int().optional() }).strict() },
-    async (args) => { const { id, model } = registry.create(args.sizeX, args.sizeY, args.sizeZ); generateAnkaraBlock(model, { roads: args.roads ?? true, seed: args.seed ?? 0 }); return { content: [{ type: "text", text: JSON.stringify({ id }) }] }; }
+    { name: "generate_city_block", description: "Generate a city block layout (roads + buildings)", inputSchema: z.object({ sizeX: z.number().int().positive(), sizeY: z.number().int().positive(), sizeZ: z.number().int().positive(), roads: z.boolean().optional(), seed: z.number().int().optional() }).strict() },
+    async (args) => { const { id, model } = registry.create(args.sizeX, args.sizeY, args.sizeZ); generateCityBlock(model, { roads: args.roads ?? true, seed: args.seed ?? 0 }); return { content: [{ type: "text", text: JSON.stringify({ id }) }] }; }
   );
   // Nightlife: venue interior
   registerTool(
@@ -914,7 +914,7 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   );
   // Nightlife: character shell (legacy)
   registerTool(
-    { name: "generate_venue_character", description: "Generate a themed humanoid character for a venue/nightclub scenario", inputSchema: z.object({ sizeX: z.number().int().positive(), sizeY: z.number().int().positive(), sizeZ: z.number().int().positive(), role: z.enum(["konsomatris","musteri","garson","asci","polis","mafya","behzatc"]) }).strict() },
+    { name: "generate_venue_character", description: "Generate a themed humanoid character for a venue/nightclub scenario", inputSchema: z.object({ sizeX: z.number().int().positive(), sizeY: z.number().int().positive(), sizeZ: z.number().int().positive(), role: z.enum(["hostess","customer","waiter","cook","police_officer","gangster","detective"]) }).strict() },
     async (args) => { const { id, model } = registry.create(args.sizeX, args.sizeY, args.sizeZ); generateVenueCharacter(model, { role: args.role }); return { content: [{ type: "text", text: JSON.stringify({ id }) }] }; }
   );
 
@@ -922,12 +922,12 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   registerTool(
     {
       name: "generate_staff",
-      description: "Generate detailed staff/employee character for a nightclub/venue. Types: barman (bartender with shaker), chef (cook with hat & pan), cleaner (mop & uniform), konsomatris (elegant hostess), musician (with instrument), security (bouncer with sunglasses), waiter (tray & bow tie)",
+      description: "Generate detailed staff/employee character for a nightclub/venue. Types: bartender (bartender with shaker), chef (cook with hat & pan), cleaner (mop & uniform), hostess (elegant hostess), musician (with instrument), security (bouncer with sunglasses), waiter (tray & bow tie)",
       inputSchema: z.object({
         sizeX: z.number().int().positive().default(32),
         sizeY: z.number().int().positive().default(32),
         sizeZ: z.number().int().positive().default(48),
-        type: z.enum(["barman", "chef", "cleaner", "konsomatris", "musician", "security", "waiter"]),
+        type: z.enum(["bartender", "chef", "cleaner", "hostess", "musician", "security", "waiter"]),
         style: z.enum(["default", "fancy", "casual"]).optional(),
         seed: z.number().int().optional()
       }).strict(),
@@ -943,12 +943,12 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   registerTool(
     {
       name: "generate_customer",
-      description: "Generate detailed customer character for a nightclub/venue. Types: regular (normal customer), worker (blue-collar with hard hat), elite (rich in suit), nostalgic (old-timer with flat cap), emotional (sad with tissue), young (trendy with phone), bureaucrat (government employee with briefcase), undercover (plain-clothes cop with earpiece), sapkali (farmer who sold his land), gangster (mafioso with gold chain), foreign (tourist with camera), vip (flashy with champagne), behzatc (Behzat C. style - leather jacket, cigarette, raki)",
+      description: "Generate detailed customer character for a nightclub/venue. Types: regular (normal customer), worker (blue-collar with hard hat), elite (rich in suit), retiree (older patron with flat cap), emotional (sad with tissue), young (trendy with phone), bureaucrat (government employee with briefcase), undercover (plain-clothes cop with earpiece), farmer (rural patron with flat cap), gangster (mafioso with gold chain), foreign (tourist with camera), vip (flashy with champagne), detective (leather jacket, stubble, whiskey glass)",
       inputSchema: z.object({
         sizeX: z.number().int().positive().default(32),
         sizeY: z.number().int().positive().default(32),
         sizeZ: z.number().int().positive().default(48),
-        type: z.enum(["regular", "worker", "elite", "nostalgic", "emotional", "young", "bureaucrat", "undercover", "sapkali", "gangster", "foreign", "vip", "behzatc"]),
+        type: z.enum(["regular", "worker", "elite", "retiree", "emotional", "young", "bureaucrat", "undercover", "farmer", "gangster", "foreign", "vip", "detective"]),
         pose: z.enum(["standing", "sitting", "drinking"]).optional(),
         seed: z.number().int().optional()
       }).strict(),
@@ -1304,18 +1304,18 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
     description: "Plan a procedural house without modifying the workspace",
     argsSchema: z.object({ size: z.string().optional(), floors: z.string().optional(), style: z.string().optional() })
   }, async ({ size = "64", floors = "2", style = "modern" }) => ({
-    messages: [{ role: "user", content: { type: "text", text: `Create a ${size}×${size}×${size} voxel house with ${floors} floors in ${style} style using generate_house. Inspect it with render_model before saving.` } }]
+    messages: [{ role: "user", content: { type: "text", text: `Create a ${size}x${size}x${size} voxel house with ${floors} floors in ${style} style using generate_house. Inspect it with render_model before saving.` } }]
   }));
   server.registerPrompt("make_character", {
     description: "Plan a procedural character without modifying the workspace",
     argsSchema: z.object({ size: z.string().optional(), style: z.string().optional() })
   }, async ({ size = "64", style = "default" }) => ({
-    messages: [{ role: "user", content: { type: "text", text: `Create a ${size}×${size}×${size} voxel character in ${style} style using generate_character, then inspect it with render_model.` } }]
+    messages: [{ role: "user", content: { type: "text", text: `Create a ${size}x${size}x${size} voxel character in ${style} style using generate_character, then inspect it with render_model.` } }]
   }));
-  server.registerResource("models", "magica:models", { description: "Models in the current session", mimeType: "application/json" }, async uri => ({
+  server.registerResource("models", "magicavoxel:models", { description: "Models in the current session", mimeType: "application/json" }, async uri => ({
     contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(registry.list()) }]
   }));
-  server.registerResource("vox_files", new ResourceTemplate("magica:vox/{folder}", { list: undefined }), {
+  server.registerResource("vox_files", new ResourceTemplate("magicavoxel:vox/{folder}", { list: undefined }), {
     description: "List .vox files in a workspace subfolder", mimeType: "application/json"
   }, async (uri, variables) => {
     const folder = String(variables.folder ?? ".");
@@ -1341,16 +1341,16 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
     }
   );
 
-  // open_in_magica
+  // open_in_magicavoxel
   registerTool(
     {
-      name: "open_in_magica",
+      name: "open_in_magicavoxel",
       description: "Open a .vox file in MagicaVoxel.exe",
       inputSchema: z.object({ path: z.string() }).strict(),
     },
     async (args) => {
       const exe = config.getMagicaPath();
-      if (!exe) throw new Error("MagicaVoxel.exe not configured; call set_magica_path first or place it in default location.");
+      if (!exe) throw new Error("MagicaVoxel executable not configured; set the MAGICAVOXEL_PATH environment variable.");
       const p = args.path as string;
       const abs = path.isAbsolute(p) ? p : path.join(process.cwd(), p);
       if (!fs.existsSync(abs)) throw new Error(`File not found: ${abs}`);
@@ -1364,8 +1364,8 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   );
 
   for (const [name, uri, folder, extension] of [
-    ["samples", "magica:samples", "vox", ".vox"],
-    ["palettes", "magica:palettes", "palette", ".png"]
+    ["samples", "magicavoxel:samples", "vox", ".vox"],
+    ["palettes", "magicavoxel:palettes", "palette", ".png"]
   ] as const) {
     server.registerResource(name, uri, { mimeType: "application/json", description: `Available ${name} in workspace/${folder}` }, async resourceUri => {
       const candidate = path.join(files.root, folder);
@@ -1379,32 +1379,32 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
 
 function getStaffDescription(type: string): string {
   const descriptions: Record<string, string> = {
-    barman: "Bartender - White shirt, black vest, bow tie. Holding cocktail shaker. Expert at mixing drinks and listening to customers' problems.",
-    chef: "Chef/Cook - Traditional white chef's uniform with tall toque hat. Holding frying pan. Master of Turkish cuisine and late-night snacks.",
-    cleaner: "Cleaner - Blue uniform with cap and apron. Carrying mop. Keeps the place spotless despite the chaos.",
-    konsomatris: "Hostess - Elegant dress with jewelry. High heels and styled hair. The heart and soul of the venue experience.",
-    musician: "Musician - Casual dark clothes. Playing saz/guitar. Performs melancholic Turkish songs and arabesk classics.",
-    security: "Bouncer - All black attire, sunglasses, earpiece. Muscular build with crossed arms. Maintains order with a stern look.",
-    waiter: "Waiter - White shirt, black vest, bow tie. Carrying tray with drinks. Quick, professional, and always attentive.",
+    bartender: "Bartender - White shirt, black vest, bow tie. Holding a cocktail shaker.",
+    chef: "Chef - White chef's uniform with tall toque hat. Holding a frying pan.",
+    cleaner: "Cleaner - Blue uniform with cap and apron. Carrying a mop.",
+    hostess: "Hostess - Elegant dress with jewelry, high heels and styled hair.",
+    musician: "Musician - Casual dark clothes. Playing a guitar.",
+    security: "Security guard - All black attire, sunglasses, earpiece. Muscular build with crossed arms.",
+    waiter: "Waiter - White shirt, black vest, bow tie. Carrying a tray with drinks.",
   };
   return descriptions[type] ?? "Staff member";
 }
 
 function getCustomerDescription(type: string): string {
   const descriptions: Record<string, string> = {
-    regular: "Regular Customer - Ordinary person enjoying a night out. Simple clothes, relaxed attitude.",
-    worker: "Worker Customer - Blue-collar worker with hard hat and overalls. Just finished a long shift, looking to unwind.",
-    elite: "Elite Customer - Wealthy patron in expensive suit with gold accessories. Expects premium service.",
-    nostalgic: "Nostalgic Customer - Old-timer with flat cap and cardigan. Misses the old Ankara days and classic Turkish music.",
-    emotional: "Emotional Customer - Sad customer with tears and tissue. Drowning sorrows in rakı, has a story to tell.",
-    young: "Young Customer - Trendy 20-something with modern haircut and smartphone. Here for the experience and Instagram.",
-    bureaucrat: "Bureaucrat Customer - Government employee in gray suit with briefcase. After-work stress relief.",
-    undercover: "Undercover Cop - Plain-clothes police with earpiece and concealed holster. Watching, always watching...",
-    sapkali: "Şapkalı (Farmer) - Rural farmer who sold his land, wearing traditional flat cap. Spending his money freely.",
-    gangster: "Gangster Customer - Mafioso type with dark suit, gold chain, and slicked hair. Commands respect and a corner table.",
-    foreign: "Foreign Tourist - Tourist in Hawaiian shirt with camera. Fascinated by the authentic Turkish nightlife.",
-    vip: "VIP Customer - Flashy high-roller with designer clothes and champagne. Gets the best table and special treatment.",
-    behzatc: "Behzat Ç. Style - Leather jacket, stubble, cigarette, and rakı glass. Tired eyes that have seen too much. The iconic Ankara cop look.",
+    regular: "Regular customer - Ordinary person enjoying a night out. Simple clothes, relaxed attitude.",
+    worker: "Worker - Blue-collar worker with hard hat and overalls, just finished a long shift.",
+    elite: "Elite customer - Wealthy patron in an expensive suit with gold accessories.",
+    retiree: "Retiree - Older patron with flat cap and cardigan.",
+    emotional: "Emotional customer - Sad patron with tears and a tissue.",
+    young: "Young customer - Trendy twenty-something with a modern haircut and smartphone.",
+    bureaucrat: "Bureaucrat - Office employee in a gray suit with a briefcase.",
+    undercover: "Undercover officer - Plain clothes with a discreet earpiece.",
+    farmer: "Farmer - Rural patron wearing a flat cap and simple clothes.",
+    gangster: "Gangster - Dark suit, gold chain and slicked hair.",
+    foreign: "Tourist - Hawaiian shirt with a camera.",
+    vip: "VIP customer - Flashy high-roller with designer clothes and champagne.",
+    detective: "Detective - Leather jacket, stubble and a whiskey glass. Tired eyes.",
   };
   return descriptions[type] ?? "Customer";
 }

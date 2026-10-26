@@ -501,7 +501,7 @@ function generateNatureImpl(
 
 // ===== Nightlife Set - City/Interior/Characters =====
 
-function generateAnkaraBlockImpl(model: VoxModelData, opts: { roads?: boolean; seed?: number }) {
+function generateCityBlockImpl(model: VoxModelData, opts: { roads?: boolean; seed?: number }) {
   const { sizeX, sizeY, sizeZ } = model;
   const rng = createRng(opts.seed ?? 42);
   const roadI = 20, buildingI = 100, glassI = 180, neonI = 230;
@@ -552,17 +552,17 @@ function generateVenueInteriorImpl(model: VoxModelData, opts: { seed?: number })
   for (let x=3; x<sizeX-3; x+=4) model.voxels.push({ x, y: 3, z: 3, i: 230 });
 }
 
-function generateVenueCharacterImpl(model: VoxModelData, opts: { role: "konsomatris"|"musteri"|"garson"|"asci"|"polis"|"mafya"|"behzatc"; seed?: number }) {
+function generateVenueCharacterImpl(model: VoxModelData, opts: { role: "hostess"|"customer"|"waiter"|"cook"|"police_officer"|"gangster"|"detective"; seed?: number }) {
   // Simple humanoid with color scheme per role
   const { sizeX, sizeY, sizeZ } = model; const cx=Math.floor(sizeX/2), cy=Math.floor(sizeY/2), b=1;
   const colors: Record<string, [number,number,number,number,number]> = {
-    konsomatris: [200,180,230,250,80], // dress, torso, head, accents, boots
-    musteri: [100,120,200,80,60],
-    garson: [40,120,200,230,40],
-    asci: [120,200,230,200,180],
-    polis: [80,120,200,250,40],
-    mafya: [40,80,200,230,60],
-    behzatc: [80,100,200,230,60],
+    hostess: [200,180,230,250,80], // dress, torso, head, accents, boots
+    customer: [100,120,200,80,60],
+    waiter: [40,120,200,230,40],
+    cook: [120,200,230,200,180],
+    police_officer: [80,120,200,250,40],
+    gangster: [40,80,200,230,60],
+    detective: [80,100,200,230,60],
   };
   const [leg, torso, head, accent, shoe] = colors[opts.role] ?? [60,120,200,230,40];
   // legs
@@ -575,12 +575,12 @@ function generateVenueCharacterImpl(model: VoxModelData, opts: { role: "konsomat
   fillBox(model, cx+6, cy-2, b+11, cx+8, cy+2, b+18, torso);
   // head
   fillBox(model, cx-3, cy-3, b+21, cx+3, cy+3, b+27, head);
-  // accents: badge/tie for police/garson, etc.
+  // accents: badge/tie for police_officer/waiter, etc.
   model.voxels.push({ x: cx, y: cy, z: b+15, i: accent });
 }
 
 // ===== STAFF CHARACTERS =====
-export type StaffType = "barman" | "chef" | "cleaner" | "konsomatris" | "musician" | "security" | "waiter";
+export type StaffType = "bartender" | "chef" | "cleaner" | "hostess" | "musician" | "security" | "waiter";
 
 function generateStaffImpl(
   model: VoxModelData,
@@ -594,10 +594,10 @@ function generateStaffImpl(
 
   // Color palettes per staff type [skin, pants, shirt, accent, shoes, hair, accessory]
   const staffColors: Record<StaffType, { skin: number; pants: number; shirt: number; accent: number; shoes: number; hair: number; accessory: number }> = {
-    barman: { skin: 200, pants: 40, shirt: 230, accent: 250, shoes: 30, hair: 80, accessory: 180 }, // white shirt, black pants, bow tie
+    bartender: { skin: 200, pants: 40, shirt: 230, accent: 250, shoes: 30, hair: 80, accessory: 180 }, // white shirt, black pants, bow tie
     chef: { skin: 200, pants: 230, shirt: 230, accent: 200, shoes: 230, hair: 80, accessory: 250 }, // all white, chef hat
     cleaner: { skin: 200, pants: 100, shirt: 120, accent: 180, shoes: 60, hair: 80, accessory: 230 }, // blue uniform
-    konsomatris: { skin: 200, pants: 180, shirt: 200, accent: 250, shoes: 40, hair: 230, accessory: 250 }, // elegant dress, heels
+    hostess: { skin: 200, pants: 180, shirt: 200, accent: 250, shoes: 40, hair: 230, accessory: 250 }, // elegant dress, heels
     musician: { skin: 200, pants: 40, shirt: 160, accent: 230, shoes: 40, hair: 100, accessory: 180 }, // casual dark, instrument
     security: { skin: 200, pants: 40, shirt: 40, accent: 250, shoes: 30, hair: 60, accessory: 230 }, // all black, badge
     waiter: { skin: 200, pants: 40, shirt: 230, accent: 200, shoes: 40, hair: 80, accessory: 150 }, // white shirt, black pants, tray
@@ -640,7 +640,7 @@ function generateStaffImpl(
 
   // === TYPE-SPECIFIC DETAILS ===
   switch (opts.type) {
-    case "barman": {
+    case "bartender": {
       // Bow tie
       fillBox(model, cx - 1, cy - 2, b + 19, cx + 1, cy - 2, b + 20, c.accent);
       // Vest
@@ -675,7 +675,7 @@ function generateStaffImpl(
       fillBox(model, cx + 5, cy - 2, b, cx + 8, cy + 1, b + 2, 180); // mop head
       break;
     }
-    case "konsomatris": {
+    case "hostess": {
       // Elegant dress (replaces default)
       fillBox(model, cx - 4, cy - 2, b + 10, cx + 4, cy + 2, b + 20, c.shirt); // bodice
       // Skirt (wider at bottom)
@@ -696,7 +696,7 @@ function generateStaffImpl(
       break;
     }
     case "musician": {
-      // Guitar/Saz
+      // Guitar
       fillSphere(model, cx - 6, cy - 1, b + 12, 3, 90); // body
       fillBox(model, cx - 6, cy - 1, b + 15, cx - 5, cy, b + 25, 80); // neck
       // Strings
@@ -736,8 +736,8 @@ function generateStaffImpl(
 
 // ===== CUSTOMER CHARACTERS =====
 export type CustomerType =
-  | "regular" | "worker" | "elite" | "nostalgic" | "emotional" | "young"
-  | "bureaucrat" | "undercover" | "sapkali" | "gangster" | "foreign" | "vip" | "behzatc";
+  | "regular" | "worker" | "elite" | "retiree" | "emotional" | "young"
+  | "bureaucrat" | "undercover" | "farmer" | "gangster" | "foreign" | "vip" | "detective";
 
 function generateCustomerImpl(
   model: VoxModelData,
@@ -754,16 +754,16 @@ function generateCustomerImpl(
     regular: { skin: 200, pants: 100, shirt: 120, accent: 150, shoes: 60, hair: 80, accessory: 0 },
     worker: { skin: 190, pants: 80, shirt: 90, accent: 100, shoes: 60, hair: 70, accessory: 230 }, // overalls, hard hat
     elite: { skin: 210, pants: 40, shirt: 230, accent: 250, shoes: 40, hair: 60, accessory: 250 }, // suit, gold watch
-    nostalgic: { skin: 200, pants: 100, shirt: 140, accent: 120, shoes: 70, hair: 150, accessory: 100 }, // old-fashioned
+    retiree: { skin: 200, pants: 100, shirt: 140, accent: 120, shoes: 70, hair: 150, accessory: 100 }, // old-fashioned
     emotional: { skin: 200, pants: 80, shirt: 100, accent: 180, shoes: 60, hair: 80, accessory: 180 }, // sad, tissue
     young: { skin: 200, pants: 160, shirt: 200, accent: 230, shoes: 250, hair: 230, accessory: 230 }, // trendy, colorful
     bureaucrat: { skin: 200, pants: 100, shirt: 120, accent: 200, shoes: 40, hair: 80, accessory: 230 }, // gray suit, briefcase
     undercover: { skin: 200, pants: 80, shirt: 100, accent: 40, shoes: 40, hair: 60, accessory: 180 }, // inconspicuous, earpiece
-    sapkali: { skin: 190, pants: 90, shirt: 100, accent: 80, shoes: 70, hair: 80, accessory: 90 }, // farmer hat, simple clothes
+    farmer: { skin: 190, pants: 90, shirt: 100, accent: 80, shoes: 70, hair: 80, accessory: 90 }, // farmer hat, simple clothes
     gangster: { skin: 200, pants: 40, shirt: 60, accent: 250, shoes: 40, hair: 40, accessory: 230 }, // dark suit, gold chain
     foreign: { skin: 210, pants: 160, shirt: 180, accent: 200, shoes: 150, hair: 230, accessory: 200 }, // tourist look, camera
     vip: { skin: 210, pants: 180, shirt: 200, accent: 250, shoes: 200, hair: 250, accessory: 250 }, // flashy, expensive
-    behzatc: { skin: 200, pants: 100, shirt: 80, accent: 180, shoes: 60, hair: 60, accessory: 40 }, // leather jacket, stubble
+    detective: { skin: 200, pants: 100, shirt: 80, accent: 180, shoes: 60, hair: 60, accessory: 40 }, // leather jacket, stubble
   };
 
   const c = customerColors[opts.type] ?? customerColors.regular;
@@ -836,7 +836,7 @@ function generateCustomerImpl(
       fillBox(model, cx - 2, cy + 1, b + 28, cx + 2, cy + 3, b + 31, c.hair);
       break;
     }
-    case "nostalgic": {
+    case "retiree": {
       // Flat cap
       fillBox(model, cx - 3, cy - 4, b + 30, cx + 3, cy + 1, b + 31, c.accessory);
       fillBox(model, cx - 2, cy - 5, b + 30, cx + 2, cy - 4, b + 31, c.accessory);
@@ -896,8 +896,8 @@ function generateCustomerImpl(
       model.voxels.push({ x: cx + 1, y: cy - 3, z: b + 26, i: 60 });
       break;
     }
-    case "sapkali": {
-      // Farmer's flat cap / kasket
+    case "farmer": {
+      // Farmer's flat cap
       fillBox(model, cx - 4, cy - 4, b + 30, cx + 4, cy + 2, b + 32, c.accessory);
       fillBox(model, cx - 3, cy - 6, b + 30, cx + 3, cy - 4, b + 31, c.accessory);
       // Simple rural shirt
@@ -954,7 +954,7 @@ function generateCustomerImpl(
       fillCylinder(model, cx + 7, cy - 1, b + 14, b + 18, 1, 180);
       break;
     }
-    case "behzatc": {
+    case "detective": {
       // Leather jacket
       fillBox(model, cx - 5, cy - 2, b + 12, cx + 5, cy + 2, b + 20, 80);
       // Collar up
@@ -969,7 +969,7 @@ function generateCustomerImpl(
       model.voxels.push({ x: cx + 1, y: cy - 3, z: b + 25, i: 120 });
       // Messy hair
       fillBox(model, cx - 3, cy - 1, b + 29, cx + 3, cy + 3, b + 32, 60);
-      // Raki glass
+      // Whiskey glass
       fillCylinder(model, cx - 7, cy - 1, b + 10, b + 14, 1, 250);
       break;
     }
@@ -987,19 +987,19 @@ function generateCustomerImpl(
 
 async function generateFromPromptImpl(model: VoxModelData, prompt: string, opts: { seed: number }) {
   const p = prompt.toLowerCase();
-  if (/(ev|house|bina)/.test(p)) {
-    const m = /\b(\d+)\s*kat/.exec(p);
+  if (/(house|building|home|cottage)/.test(p)) {
+    const m = /\b(\d+)\s*(?:floors?|stor(?:ey|y|eys|ies))/.exec(p);
     const floors = m ? parseInt(m[1]!, 10) : 2;
     generateHouse(model, { floors, style: /cyberpunk/.test(p) ? "cyberpunk" : "modern", seed: opts.seed });
     if (/cyberpunk/.test(p)) neonize(model);
     return;
   }
-  if (/(karakter|character|humanoid|robot)/.test(p)) {
+  if (/(character|humanoid|person|robot)/.test(p)) {
     generateCharacter(model, { style: /robot/.test(p) ? "robot" : "default", seed: opts.seed });
     if (/cyberpunk/.test(p)) neonize(model);
     return;
   }
-  if (/(sphere|k.?re)/.test(p)) {
+  if (/(sphere|ball|globe)/.test(p)) {
     const cx = Math.floor(model.sizeX / 2);
     const cy = Math.floor(model.sizeY / 2);
     const cz = Math.floor(model.sizeZ / 2);
@@ -1085,7 +1085,7 @@ export function generateWeapon(...args: Parameters<typeof generateWeaponImpl>) {
 export function generateStructure(...args: Parameters<typeof generateStructureImpl>) { generateStructureImpl(...args); finishGeneration(args[0]); }
 export function generateCreature(...args: Parameters<typeof generateCreatureImpl>) { generateCreatureImpl(...args); finishGeneration(args[0]); }
 export function generateNature(...args: Parameters<typeof generateNatureImpl>) { generateNatureImpl(...args); finishGeneration(args[0]); }
-export function generateAnkaraBlock(...args: Parameters<typeof generateAnkaraBlockImpl>) { generateAnkaraBlockImpl(...args); finishGeneration(args[0]); }
+export function generateCityBlock(...args: Parameters<typeof generateCityBlockImpl>) { generateCityBlockImpl(...args); finishGeneration(args[0]); }
 export function generateVenueInterior(...args: Parameters<typeof generateVenueInteriorImpl>) { generateVenueInteriorImpl(...args); finishGeneration(args[0]); }
 export function generateVenueCharacter(...args: Parameters<typeof generateVenueCharacterImpl>) { generateVenueCharacterImpl(...args); finishGeneration(args[0]); }
 export function generateStaff(...args: Parameters<typeof generateStaffImpl>) { generateStaffImpl(...args); finishGeneration(args[0]); }

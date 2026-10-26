@@ -6,7 +6,7 @@ import path from 'node:path';
 import { MagicaConfig } from '../src/magicaConfig.js';
 
 test('MagicaVoxel configuration rejects directories and unrelated executables', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'magica-config-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'magicvoxel-config-'));
   try {
     const config = new MagicaConfig();
     assert.throws(() => config.setMagicaPath(root), /file|executable|MagicaVoxel/);

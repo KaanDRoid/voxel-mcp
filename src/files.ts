@@ -4,7 +4,7 @@ import path from "node:path";
 /** File access is confined to a user-selected workspace, including symlink targets. */
 export class FilePolicy {
   readonly root: string;
-  constructor(root = process.env.VOXEL_MCP_WORKSPACE ?? process.cwd(), readonly maxInputBytes = 64 * 1024 * 1024) {
+  constructor(root = process.env.MAGICVOXEL_MCP_WORKSPACE ?? process.cwd(), readonly maxInputBytes = 64 * 1024 * 1024) {
     this.root = fs.realpathSync(path.resolve(root));
     if (!fs.statSync(this.root).isDirectory()) throw new Error("Workspace must be a directory");
   }

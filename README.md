@@ -1,4 +1,4 @@
-# MagicaVoxel MCP Server
+# magicvoxel-mcp
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for procedural voxel modeling and MagicaVoxel (`.vox`) file workflows. It runs locally over stdio, keeps models in memory, and reads and writes files only inside a workspace directory you choose.
 
@@ -17,7 +17,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 ## Requirements
 
 - Node.js 22 or newer
-- MagicaVoxel is optional and only needed for `open_in_magica`
+- MagicaVoxel is optional and only needed for `open_in_magicavoxel`
 
 ## Install
 
@@ -31,10 +31,10 @@ Point your MCP client at `dist/index.js` (see [client-config](client-config/READ
 ```json
 {
   "mcpServers": {
-    "voxel-mcp": {
+    "magicvoxel-mcp": {
       "command": "node",
-      "args": ["/absolute/path/to/voxel-mcp/dist/index.js"],
-      "env": { "VOXEL_MCP_WORKSPACE": "/absolute/path/to/workspace" }
+      "args": ["/absolute/path/to/magicvoxel-mcp/dist/index.js"],
+      "env": { "MAGICVOXEL_MCP_WORKSPACE": "/absolute/path/to/workspace" }
     }
   }
 }
@@ -44,8 +44,8 @@ Point your MCP client at `dist/index.js` (see [client-config](client-config/READ
 
 | Variable | Purpose |
 |---|---|
-| `VOXEL_MCP_WORKSPACE` | Directory for all reads and writes. Defaults to the server's working directory. Paths that escape it, including through symlinks, are rejected. |
-| `MAGICAVOXEL_PATH` | Absolute path to `MagicaVoxel.exe` or `MagicaVoxel`, enabling `open_in_magica`. |
+| `MAGICVOXEL_MCP_WORKSPACE` | Directory for all reads and writes. Defaults to the server's working directory. Paths that escape it, including through symlinks, are rejected. |
+| `MAGICAVOXEL_PATH` | Absolute path to `MagicaVoxel.exe` or `MagicaVoxel`, enabling `open_in_magicavoxel`. |
 
 ## Limits
 
@@ -53,7 +53,7 @@ Models are at most 256 voxels per axis (the VOX limit) and 2,000,000 voxels each
 
 ## Conventions
 
-- X = right, Y = forward, Z = up. Color indexes are 1–255; index 0 is empty.
+- X = right, Y = forward, Z = up. Color indexes are 1-255; index 0 is empty.
 - Palettes are 256 `uint32` values in little-endian RGBA byte order (`0xAABBGGRR`).
 - Scene model IDs are zero-based positions in the scene's model list.
 
