@@ -1328,16 +1328,17 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   registerTool(
     {
       name: "load_vox",
-      description: "Load a .vox file into memory (returns model id)",
-      inputSchema: z.object({ path: z.string() }).strict(),
+      description: "Load a .vox file into memory (returns model id). Files with several models need modelIndex to pick one; use load_vox_models to load all of them",
+      inputSchema: z.object({ path: z.string(), modelIndex: z.number().int().min(0).optional(), lenient: z.boolean().default(false) }).strict(),
     },
     async (args) => {
       const p = args.path as string;
       const abs = path.isAbsolute(p) ? p : path.join(process.cwd(), p);
-      const m = loadVOX(abs);
+      const warnings: string[] = [];
+      const m = loadVOX(abs, args.modelIndex, { lenient: args.lenient, warnings });
       const { id } = registry.create(m.sizeX, m.sizeY, m.sizeZ);
       registry.set(id, m);
-      return { content: [{ type: "text", text: JSON.stringify({ id }) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ id, ...(warnings.length ? { warnings } : {}) }) }] };
     }
   );
 

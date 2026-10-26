@@ -3,6 +3,21 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `load_vox_models` loads every model of a multi-model or animated `.vox` file and opens it as a scene; `load_vox` gets `modelIndex` (the error for multi-model files now points to both options).
+- `flatten_scene` and `extract_scene_model {bake}` apply scene rotations and translations to produce world-space models (`src/sceneBake.ts`); `src/rotation.ts` provides packed `_r` helpers for the 24 orientations.
+- Typed codecs for `rOBJ`, `rCAM`, `NOTE`, `IMAP`, `META` and `MATL` (`src/voxChunks.ts`), exposed as `scene.render`; unchanged chunks and unknown keys or chunks are written back byte-for-byte.
+- Optional `lenient` parsing for `load_scene`, `load_vox_models` and `load_vox` with `warnings`; strict stays the default.
+- `replace_scene_model` accepts `remap: "nearest"` and names the first differing palette index; a palette-less model is read with the default palette.
+- Corpus tests against the installed MagicaVoxel samples (`MAGICAVOXEL_HOME` or `MAGICAVOXEL_PATH`, skipped when absent) and synthetic v200 fixtures for CI.
+
+### Changed
+
+- Scenes are kept parsed in memory with copy-on-write edits and id indexes instead of being decoded on every call; see `docs/scene-performance.md`.
+
 ## [1.2.0]
 
 ### Changed
