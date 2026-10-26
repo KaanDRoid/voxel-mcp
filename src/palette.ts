@@ -1,17 +1,18 @@
 import fs from "fs";
 import { PNG } from "pngjs";
-import type { VoxModelData } from "./vox.js";
+import { loadImage, readImageBuffer } from "./image.js";
+import { defaultPalette, type VoxModelData } from "./vox.js";
 
 export function setPaletteIndex(model: VoxModelData, index: number, rgba: number) {
-  if (!model.palette) model.palette = new Uint32Array(256);
+  if (!model.palette) model.palette = defaultPalette();
   model.palette[index & 255] = rgba >>> 0;
 }
 
 export function loadPaletteFromPng(model: VoxModelData, path: string) {
-  const buf = fs.readFileSync(path);
+  const buf = readImageBuffer(path);
   const png = PNG.sync.read(buf);
   if (png.width * png.height < 256) throw new Error("Palette PNG must have at least 256 pixels");
-  if (!model.palette) model.palette = new Uint32Array(256);
+  if (!model.palette) model.palette = defaultPalette();
   for (let i = 0; i < 256; i++) {
     const x = i % png.width;
     const y = Math.floor(i / png.width);
@@ -20,7 +21,7 @@ export function loadPaletteFromPng(model: VoxModelData, path: string) {
     const g = png.data[idx + 1] ?? 0;
     const b = png.data[idx + 2] ?? 0;
     const a = png.data[idx + 3] ?? 255;
-    const rgba = ((a & 0xff) << 24) | ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff);
+    const rgba = ((a & 0xff) << 24) | ((b & 0xff) << 16) | ((g & 0xff) << 8) | (r & 0xff);
     model.palette[i] = rgba >>> 0;
   }
 }
@@ -31,11 +32,11 @@ export function savePaletteToPng(model: VoxModelData, path: string) {
     const x = i % 16;
     const y = Math.floor(i / 16);
     const idx = (y * 16 + x) * 4;
-    const rgba = model.palette?.[i] ?? 0xff000000;
+    const rgba = (model.palette ?? defaultPalette())[i] ?? 0;
     const a = (rgba >>> 24) & 0xff;
-    const r = (rgba >>> 16) & 0xff;
+    const r = rgba & 0xff;
     const g = (rgba >>> 8) & 0xff;
-    const b = rgba & 0xff;
+    const b = (rgba >>> 16) & 0xff;
     png.data[idx + 0] = r;
     png.data[idx + 1] = g;
     png.data[idx + 2] = b;
@@ -47,7 +48,7 @@ export function savePaletteToPng(model: VoxModelData, path: string) {
 
 export function generatePalette(name: "sunset" | "forest" | "neon" | "grayscale" = "grayscale"): Uint32Array {
   const pal = new Uint32Array(256);
-  const set = (i: number, r: number, g: number, b: number, a = 255) => { pal[i] = ((a & 0xff) << 24) | ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff); };
+  const set = (i: number, r: number, g: number, b: number, a = 255) => { pal[i] = ((a & 0xff) << 24) | ((b & 0xff) << 16) | ((g & 0xff) << 8) | (r & 0xff); };
   pal[0] = 0x00000000;
   for (let i = 1; i < 256; i++) {
     let r = i, g = i, b = i;
@@ -60,20 +61,10 @@ export function generatePalette(name: "sunset" | "forest" | "neon" | "grayscale"
 }
 
 export async function extractPaletteFromImage(imagePath: string, count = 256): Promise<Uint32Array> {
-  const { PNG } = await import("pngjs");
-  const jpeg = await import("jpeg-js");
-  const buf = fs.readFileSync(imagePath);
-  const ext = imagePath.toLowerCase();
-  let width = 0, height = 0, data: Uint8Array;
-  if (ext.endsWith(".png")) {
-    const png = PNG.sync.read(buf);
-    width = png.width; height = png.height; data = png.data;
-  } else {
-    const img = (jpeg as any).decode(buf, { useTArray: true });
-    width = img.width; height = img.height; data = img.data;
-  }
+  const { width, height, data } = await loadImage(imagePath);
   const bins = new Map<number, number>();
   for (let i = 0; i < width * height; i++) {
+    if (data[i * 4 + 3] === 0) continue;
     const r = data[i * 4 + 0] ?? 0, g = data[i * 4 + 1] ?? 0, b = data[i * 4 + 2] ?? 0;
     const rq = Math.floor(r / 16), gq = Math.floor(g / 16), bq = Math.floor(b / 16);
     const key = (rq << 8) | (gq << 4) | bq;
@@ -86,7 +77,7 @@ export async function extractPaletteFromImage(imagePath: string, count = 256): P
   for (const [key] of entries) {
     const rq = (key >> 8) & 0xf, gq = (key >> 4) & 0xf, bq = key & 0xf;
     const r = rq * 16 + 8, g = gq * 16 + 8, b = bq * 16 + 8;
-    pal[idx++] = ((255 & 0xff) << 24) | ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff);
+    pal[idx++] = ((255 & 0xff) << 24) | ((b & 0xff) << 16) | ((g & 0xff) << 8) | (r & 0xff);
     if (idx >= 256) break;
   }
   // fill remaining with grayscale

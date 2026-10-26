@@ -1,24 +1,25 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio";
+#!/usr/bin/env node
+import { McpServer } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { readFileSync } from "node:fs";
 import { MagicaConfig } from "./magicaConfig.js";
 import { ModelRegistry } from "./model.js";
 import { createTools } from "./tools.js";
 
+const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+
 async function main() {
-  const server = new McpServer(
-    { name: "magica-mcp", version: "0.1.0" },
-    { capabilities: { tools: {}, resources: {}, logging: {} } }
-  );
-
-  const config = new MagicaConfig();
+  const server = new McpServer({ name: "magica-mcp", version });
+  const config = new MagicaConfig(process.env.MAGICAVOXEL_PATH);
   const registry = new ModelRegistry();
-
   createTools(server, registry, config);
-
   await server.connect(new StdioServerTransport());
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => { void server.close().finally(() => process.exit(0)); });
+  }
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
+main().catch((error: unknown) => {
+  console.error("MagicaVoxel MCP:", error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
 });

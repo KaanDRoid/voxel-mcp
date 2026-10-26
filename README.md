@@ -1,65 +1,86 @@
 # MagicaVoxel MCP Server
 
-Model Context Protocol (MCP) server with a broad toolset for procedural voxel modeling, analysis, animation, and MagicaVoxel integration.
+A [Model Context Protocol](https://modelcontextprotocol.io) server for procedural voxel modeling and MagicaVoxel (`.vox`) file workflows. It runs locally over stdio, keeps models in memory, and reads and writes files only inside a workspace directory you choose.
 
-## Highlights
-- Shape primitives, transforms, boolean ops, region copy/paste, model cloning.
-- Advanced image ingestions: colorized voxelization, silhouette extrusion, depth maps, multi-view carving, edge-to-voxel.
-- Procedural generators: vehicles, furniture, weapons, structures, creatures, nature, Ankara-style city blocks, venue interiors, and NPC characters (staff/customers).
-- Editing/patterns: gradients, textures, erosion/dilation, outline/smooth/bevel, detail noise, surface color randomization.
-- Palette management: load/save PNG palettes, generate presets, extract/blend/apply palettes.
-- Analysis and smart tools: measurements, symmetry, LOD simplification, voxel text, auto UV coloring.
-- Animation helpers: frame registry, interpolation, spritesheet export, GIF placeholder.
-- Import/export: VOX, OBJ, PLY, STL, glTF 2.0, PNG slices, simple Minecraft schematic; OBJ/SVG importers.
+## Features
+
+- **Models and editing**: primitives (box, sphere, cylinder, cone, pyramid, torus, line), explicit voxels, copy/paste, transforms, boolean operations, morphology (erode, dilate, smooth, hollow, outline), patterns, gradients, noise and symmetry tools.
+- **Undo/redo**: `undo` and `redo` cover model edits. A failed edit rolls back automatically. File writes, scenes and animations are not part of undo.
+- **VOX files**: strict reader and writer for version 150/200 files with the official default palette. `load_vox` rejects multi-model files instead of silently dropping data.
+- **Scenes**: `create_scene`, `load_scene`, `save_scene`, `get_scene_info`, `list_scenes`, `delete_scene`, `extract_scene_model`, `replace_scene_model`, `set_scene_node`, `set_scene_layer`, `set_scene_material`. Transform, group, shape, layer and material records are preserved and unknown chunks are written back unchanged. Scenes require one shared palette, and transforms are stored rather than baked into voxel coordinates.
+- **Preview**: `render_model` returns a palette-colored PNG (`top`, `front`, `side`, `zmax`, `isometric`) directly to the client.
+- **Generators**: houses, characters, vehicles, furniture, weapons, structures, creatures, nature, terrain, trees, and city/venue helpers. Output is deterministic for a given seed.
+- **Images**: colorized voxelization, silhouettes, depth maps, edge detection and multi-view carving from PNG/JPEG.
+- **Animation**: frame registry, deterministic dissolve between frames, sprite sheets, PNG frame folders, and GIF with per-frame timing and loop setting.
+- **Export/import**: VOX, OBJ, PLY, STL, glTF 2.0 (embedded), PNG slices, legacy Minecraft `.schematic` (gzip NBT, wool-color approximation); OBJ and basic SVG import.
 
 ## Requirements
-- Node.js 18+
-- MagicaVoxel.exe (optional, required for `open_in_magica`)
 
-## Install & Run
+- Node.js 22 or newer
+- MagicaVoxel is optional and only needed for `open_in_magica`
+
+## Install
+
 ```bash
-npm install
+npm ci
 npm run build
-npm start
 ```
-Development: `npm run dev`
 
-## Key Tools (examples)
-- Model management: `create_model`, `list_models`, `clone_model`, `delete_model`, `get_model_info`
-- Primitives & editing: `fill_box`, `fill_sphere`, `draw_line`, `transform_translate`, `rotate_arbitrary`, `boolean_op`, `mirror_model`, `hollow_model`, `erode`, `dilate`, `outline`, `smooth_model`, `extrude_face`, `bevel_edges`, `add_detail_noise`
-- Patterns/gradients: `apply_pattern`, `apply_gradient`, `randomize_surface_color`
-- Image: `image_to_voxel_colorized`, `image_silhouette_to_3d`, `edge_detect_to_voxel`, `depth_map_to_voxel`, `multi_view_to_voxel`
-- Generators: `generate_vehicle`, `generate_furniture`, `generate_weapon`, `generate_structure`, `generate_creature`, `generate_nature`, `generate_ankara_block`, `generate_venue_interior`, `generate_venue_character`, `generate_staff`, `generate_customer`
-- Palette: `generate_palette`, `extract_palette_from_image`, `apply_palette_to_model`, `blend_palettes`, `set_palette_index`, `save_palette_to_png`
-- Analysis: `measure_distance`, `get_surface_area`, `get_volume`, `find_center`, `get_dimensions`, `count_colors`
-- Animation: `create_animation`, `add_frame`, `interpolate_frames`, `export_animation_spritesheet`, `export_animation_gif` (throws until encoder is added)
-- Import/Export: `save_vox`, `load_vox`, `export_obj`, `export_ply`, `export_slices`, `export_stl`, `export_gltf`, `export_minecraft_schematic`, `import_obj`, `import_svg`
-- MagicaVoxel integration: `set_magica_path`, `open_in_magica`
+Point your MCP client at `dist/index.js` (see [client-config](client-config/README.md)):
 
-## Usage Snippets
+```json
+{
+  "mcpServers": {
+    "voxel-mcp": {
+      "command": "node",
+      "args": ["/absolute/path/to/voxel-mcp/dist/index.js"],
+      "env": { "VOXEL_MCP_WORKSPACE": "/absolute/path/to/workspace" }
+    }
+  }
+}
+```
+
+## Configuration
+
+| Variable | Purpose |
+|---|---|
+| `VOXEL_MCP_WORKSPACE` | Directory for all reads and writes. Defaults to the server's working directory. Paths that escape it, including through symlinks, are rejected. |
+| `MAGICAVOXEL_PATH` | Absolute path to `MagicaVoxel.exe` or `MagicaVoxel`, enabling `open_in_magica`. |
+
+## Limits
+
+Models are at most 256 voxels per axis (the VOX limit) and 2,000,000 voxels each. The registry holds up to 64 models and 8,000,000 voxels with a bounded undo history. Input files are limited to 64 MiB; images to 32 MiB and about 4.2 million pixels. Oversized or malformed input returns a tool error.
+
+## Conventions
+
+- X = right, Y = forward, Z = up. Color indexes are 1–255; index 0 is empty.
+- Palettes are 256 `uint32` values in little-endian RGBA byte order (`0xAABBGGRR`).
+- Scene model IDs are zero-based positions in the scene's model list.
+
+## Example
+
 ```text
-# Hollow sphere
 create_model {sizeX:64, sizeY:64, sizeZ:64}
 fill_sphere {id:"1", cx:32, cy:32, cz:32, r:20, i:200}
 hollow_model {id:"1", thickness:2}
+render_model {id:"1", projection:"isometric"}
 save_vox {id:"1", path:"out/hollow_sphere.vox"}
-
-# Colorized heightmap
-image_to_voxel_colorized {path:"input.png", sizeX:128, sizeY:128, sizeZ:64, mode:"heightmap"}
-apply_gradient {id:"1", axis:"z", i0:100, i1:200}
-
-# Night venue setup
-generate_ankara_block {sizeX:180, sizeY:180, sizeZ:48}
-create_model {sizeX:64, sizeY:64, sizeZ:32}
-generate_venue_interior {id:"2"}
 ```
 
-## Notes
-- Palette: 256 colors (index 0 = empty). Default palette is grayscale.
-- Coordinates: X=right, Y=forward, Z=up.
-- Performance: `deduplicate_voxels` helps after heavy ops.
-- GIF export currently throws; spritesheet PNG is available.
-- Minecraft export uses a simple JSON schematic (not NBT).
+## Development
 
-## Client Integration (Claude Desktop)
-Use `client-config/claude-desktop.json` as a template; build with `npm run build` and run `node dist/index.js` from the repo root.
+```bash
+npm run typecheck   # strict type check of sources and tests
+npm test            # build, then run all tests, including real stdio MCP sessions
+npm run check       # typecheck, tests and npm audit
+```
+
+## Known limitations
+
+- OBJ import samples surfaces (no solid fill); SVG import supports unstyled `<rect>` and `<circle>` only.
+- GIF frames are limited to 255 opaque colors with on/off transparency.
+- MagicaVoxel is launched with a file but is not remotely controlled.
+
+## License
+
+ISC

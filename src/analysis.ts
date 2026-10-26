@@ -1,11 +1,20 @@
 import type { VoxModelData } from "./vox.js";
+import { normalizeModel } from "./model.js";
+
+function normalized(model: VoxModelData): VoxModelData {
+  const out={...model,voxels:model.voxels};
+  normalizeModel(out);
+  return out;
+}
 
 export function measureDistance(a: [number, number, number], b: [number, number, number]): number {
+  if(![...a,...b].every(Number.isFinite))throw new Error("Distance coordinates must be finite");
   const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 export function getSurfaceArea(model: VoxModelData): number {
+  model=normalized(model);
   const sx = model.sizeX, sy = model.sizeY, sz = model.sizeZ;
   const occ = new Uint8Array(sx * sy * sz);
   const idx = (x: number, y: number, z: number) => x + sx * (y + sy * z);
@@ -23,10 +32,12 @@ export function getSurfaceArea(model: VoxModelData): number {
 }
 
 export function getVolume(model: VoxModelData): number {
+  model=normalized(model);
   return model.voxels.length;
 }
 
 export function findCenter(model: VoxModelData): [number, number, number] {
+  model=normalized(model);
   if (model.voxels.length === 0) return [0, 0, 0];
   let sx = 0, sy = 0, sz = 0;
   for (const v of model.voxels) { sx += v.x; sy += v.y; sz += v.z; }
@@ -35,6 +46,7 @@ export function findCenter(model: VoxModelData): [number, number, number] {
 }
 
 export function getDimensions(model: VoxModelData): { min: [number, number, number]; max: [number, number, number] } {
+  model=normalized(model);
   if (model.voxels.length === 0) return { min: [0, 0, 0], max: [0, 0, 0] };
   let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   for (const v of model.voxels) {
@@ -46,6 +58,7 @@ export function getDimensions(model: VoxModelData): { min: [number, number, numb
 }
 
 export function countColors(model: VoxModelData): Record<number, number> {
+  model=normalized(model);
   const hist: Record<number, number> = {};
   for (const v of model.voxels) hist[v.i] = (hist[v.i] ?? 0) + 1;
   return hist;

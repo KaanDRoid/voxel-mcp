@@ -39,8 +39,9 @@ export function makeSymmetric(model: VoxModelData, axis: "x" | "y" | "z") {
 }
 
 export function simplifyModel(model: VoxModelData, factor: number) {
+  if (!Number.isFinite(factor)) throw new Error("factor must be finite");
   const f = Math.max(1, Math.floor(factor)); if (f === 1) return;
-  const nx = Math.max(1, Math.floor(model.sizeX / f)), ny = Math.max(1, Math.floor(model.sizeY / f)), nz = Math.max(1, Math.floor(model.sizeZ / f));
+  const nx = Math.max(1, Math.ceil(model.sizeX / f)), ny = Math.max(1, Math.ceil(model.sizeY / f)), nz = Math.max(1, Math.ceil(model.sizeZ / f));
   const occ = new Map<string, number>();
   for (const v of model.voxels) {
     const x = Math.floor(v.x / f), y = Math.floor(v.y / f), z = Math.floor(v.z / f);

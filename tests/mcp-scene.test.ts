@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/client';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { loadVOXScene } from '../src/scene.js';
+
+test('scene tools retain models, transforms, layers and materials through the actual protocol', { timeout: 20000 }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'voxel-scene-mcp-'));
+  const transport = new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL('../dist/index.js', import.meta.url))], cwd: root, stderr: 'pipe' });
+  const client = new Client({ name: 'scene-test', version: '1.0.0' });
+  try {
+    await client.connect(transport);
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const result = await client.callTool({ name, arguments: args });
+      assert.ok(!result.isError, `${name}: ${JSON.stringify(result)}`);
+      const text = (result.content as { text: string }[])[0]!.text;
+      return /^[\[{]/.test(text) ? JSON.parse(text) : { message: text };
+    };
+    const { id } = await call('create_model', { sizeX: 8, sizeY: 8, sizeZ: 8 });
+    await call('set_voxels', { id, voxels: [{ x: 1, y: 2, z: 3, i: 20 }] });
+    const { sceneId } = await call('create_scene', { modelIds: [id, id] });
+    const info = await call('get_scene_info', { sceneId });
+    assert.equal(info.models.length, 2);
+    const node = info.nodes.find((n: { type: string; id: number }) => n.type === 'nTRN' && n.id !== 0);
+    await call('set_scene_node', { sceneId, nodeId: node.id, attributes: { _name: 'Building' }, translation: [16, 4, 0] });
+    await call('set_scene_layer', { sceneId, layerId: 0, attributes: { _name: 'Buildings', _hidden: '0' } });
+    await call('set_scene_material', { sceneId, index: 20, properties: { _type: '_metal', _rough: '0.4' } });
+    await call('save_scene', { sceneId, path: 'out/city.vox' });
+    const scene = loadVOXScene(path.join(root, 'out/city.vox'));
+    assert.equal(scene.models.length, 2);
+    assert.equal(scene.nodes.find(n => n.id === node.id)!.attributes._name, 'Building');
+    const transformed = scene.nodes.find(n => n.id === node.id);
+    assert.equal(transformed?.type === 'nTRN' ? transformed.frames[0]!._t : '', '16 4 0');
+    assert.equal(scene.layers[0]!.attributes._name, 'Buildings');
+    assert.equal(scene.materials[0]!.attributes._type, '_metal');
+    const loaded = await call('load_scene', { path: 'out/city.vox' });
+    assert.equal((await call('list_scenes')).length, 2);
+    const extracted = await call('extract_scene_model', { sceneId: loaded.sceneId, modelIndex: 1 });
+    assert.equal((await call('get_model_info', { id: extracted.id })).voxelCount, 1);
+    await call('replace_scene_model', { sceneId, modelIndex: 0, id: extracted.id });
+    const invalid = await client.callTool({ name: 'set_scene_node', arguments: { sceneId, nodeId: node.id, translation: [1, 2, 3], rotation: 0 } });
+    assert.equal(invalid.isError, true);
+    const unchanged = await call('get_scene_info', { sceneId });
+    assert.equal(unchanged.nodes.find((n: { id: number }) => n.id === node.id).frames[0]._t, '16 4 0');
+    await call('delete_scene', { sceneId });
+    assert.equal((await call('list_scenes')).length, 1);
+  } finally { await client.close(); await transport.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
