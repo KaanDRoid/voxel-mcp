@@ -9,17 +9,21 @@ import { imageToVoxelColorized, silhouetteTo3D, edgeDetectToVoxel, depthMapToVox
 import { deduplicateVoxels, mirror, hollow, floodFill, applyNoise, generateTerrain, generateTree, replaceColor, applyPattern, applyGradient, randomizeSurfaceColor, erode, dilate, outline, smoothModel, extrudeFace, bevelEdges, addDetailNoise } from "./ops.js";
 import { setPaletteIndex, loadPaletteFromPng, savePaletteToPng, generatePalette, extractPaletteFromImage, applyPaletteToModel, blendPalettes } from "./palette.js";
 import { measureDistance, getSurfaceArea, getVolume, findCenter, getDimensions, countColors } from "./analysis.js";
-import { exportOBJ, exportPLY, exportSlices } from "./export.js";
-import { exportSTL, exportGLTF, exportMinecraftSchematic } from "./export_extra.js";
-import { importOBJ, importSVG } from "./importers.js";
-import { AnimationRegistry, exportAnimationSpriteSheet, exportAnimationGIF, interpolateFrames, exportAnimationFrames, renderFrameToPNG } from "./animation.js";
+import { exportSlices } from "./export.js";
+import { exportMinecraftSchematic } from "./export_extra.js";
+import { AnimationRegistry, exportAnimationSpriteSheet, interpolateFrames, exportAnimationFrames, renderFrameToPNG } from "./animation.js";
 import { autoUvColor, detectSymmetry, makeSymmetric, simplifyModel, voxelizeText } from "./smart.js";
 import path from "path";
 import fs from "fs";
-import { spawn } from "child_process";
 import { PNG } from "pngjs";
 import { FilePolicy } from "./files.js";
 import { registerSceneTools } from "./sceneTools.js";
+import { INSTALL_READ_ONLY_TOOLS, registerInstallTools } from "./installTools.js";
+import { openVoxFile } from "./openApp.js";
+import { FORMAT_READ_ONLY, registerFormatTools } from "./formatTools.js";
+
+import { registerXsTools, XS_READ_ONLY_TOOLS } from "./xsTools.js";
+
 
 // Clipboard for copy/paste operations
 
@@ -28,7 +32,11 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   const clipboard: { voxels: { x: number; y: number; z: number; i: number }[] } = { voxels: [] };
   const files = new FilePolicy();
   let pending: Promise<unknown> = Promise.resolve();
-  const readOnly = new Set(["list_models", "get_model_info", "measure_distance", "get_surface_area", "get_volume", "find_center", "get_dimensions", "count_colors", "detect_symmetry", "render_model", "copy_region", "list_scenes", "get_scene_info"]);
+  const readOnly = new Set(["list_models", "get_model_info", "measure_distance", "get_surface_area", "get_volume", "find_center", "get_dimensions", "count_colors", "detect_symmetry", "render_model", "copy_region", "list_scenes", "get_scene_info", ...INSTALL_READ_ONLY_TOOLS]);
+  for (const name of FORMAT_READ_ONLY) readOnly.add(name);
+
+  for (const name of XS_READ_ONLY_TOOLS) readOnly.add(name);
+
   function registerTool<T extends z.ZodRawShape>(definition: { name: string; description: string; inputSchema: z.ZodObject<T> }, handler: (args: z.infer<z.ZodObject<T>>) => Promise<CallToolResult>) {
     const { name, ...schema } = definition;
     server.registerTool(name, { ...schema, annotations: { readOnlyHint: readOnly.has(name), destructiveHint: !readOnly.has(name), openWorldHint: name === "open_in_magicavoxel" } }, async args => {
@@ -38,16 +46,16 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
           const limits: Record<string, number> = { sizeX: 256, sizeY: 256, sizeZ: 256, r: 256, majorR: 256, minorR: 256, height: 256, thickness: 256, amount: 256, floors: 32, iterations: 16, steps: 60, octaves: 8, fps: 120, durationMs: 600000 };
           for (const [key, value] of Object.entries(parameters)) {
             if (typeof value === "number" && (!Number.isFinite(value) || (limits[key] !== undefined && value > limits[key]!))) throw new Error(`${key} exceeds the supported limit`);
-            if (typeof value === "string" && value.length > 4096) throw new Error(`${key} exceeds the string limit`);
+            if (typeof value === "string" && value.length > (key === "source" ? 256 * 1024 : 4096)) throw new Error(`${key} exceeds the string limit`);
             if (Array.isArray(value) && value.length > 262144) throw new Error(`${key} exceeds the array limit`);
             if (/^(x[01]?|y[01]?|z[01]?|c[xyz]|d[xyz]|offset[XYZ])$/.test(key) && typeof value === "number" && Math.abs(value) > 4096) throw new Error(`${key} exceeds the coordinate limit`);
             if (typeof value === "string" && ["path", "folder", "frontPath", "sidePath", "topPath"].includes(key)) {
-              parameters[key] = name.startsWith("export_") || name.startsWith("save_")
+              parameters[key] = /^(export_|save_|write_)/.test(name)
                 ? files.prepareOutput(value, key === "folder") : files.resolve(value, "read");
               if (key === "folder" && fs.readdirSync(parameters[key] as string).some(f => fs.lstatSync(path.join(parameters[key] as string, f)).isSymbolicLink())) throw new Error("Output directory contains symbolic links");
             }
           }
-          const modelMutation = !readOnly.has(name) && !/^(export_|save_)/.test(name) && !name.includes("scene") && !name.includes("animation") && !["undo", "redo", "open_in_magicavoxel", "add_frame", "set_frame_duration", "duplicate_frame", "remove_frame", "reorder_frame", "interpolate_frames"].includes(name);
+          const modelMutation = !readOnly.has(name) && !/^(export_|save_|write_)/.test(name) && !name.includes("scene") && !name.includes("animation") && !["undo", "redo", "open_in_magicavoxel", "add_frame", "set_frame_duration", "duplicate_frame", "remove_frame", "reorder_frame", "interpolate_frames"].includes(name);
           return modelMutation
             ? await registry.transaction(() => handler(parameters as z.infer<z.ZodObject<T>>))
             : await handler(parameters as z.infer<z.ZodObject<T>>);
@@ -64,6 +72,7 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   registerTool({ name: "redo", description: "Redo the last undone model-registry edit", inputSchema: z.object({}).strict() }, async () => ({ content: [{ type: "text", text: JSON.stringify({ changed: registry.redo() }) }] }));
 
   registerSceneTools(registerTool, registry);
+  registerXsTools(registerTool, registry, config, files);
 
   // create_model
   registerTool(
@@ -1061,35 +1070,6 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   );
 
   // Export tools
-  registerTool(
-    {
-      name: "export_obj",
-      description: "Export model to OBJ mesh format",
-      inputSchema: z.object({ id: z.string(), path: z.string() }).strict(),
-    },
-    async (args) => {
-      const m = registry.get(args.id);
-      const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path);
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
-      exportOBJ(m, abs);
-      return { content: [{ type: "text", text: `exported OBJ to ${abs}` }] };
-    }
-  );
-
-  registerTool(
-    {
-      name: "export_ply",
-      description: "Export model to PLY point cloud format",
-      inputSchema: z.object({ id: z.string(), path: z.string() }).strict(),
-    },
-    async (args) => {
-      const m = registry.get(args.id);
-      const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path);
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
-      exportPLY(m, abs);
-      return { content: [{ type: "text", text: `exported PLY to ${abs}` }] };
-    }
-  );
 
   registerTool(
     {
@@ -1161,30 +1141,15 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
 
   // Export extensions
   registerTool(
-    { name: "export_stl", description: "Export model as ASCII STL", inputSchema: z.object({ id: z.string(), path: z.string() }).strict() },
-    async (args) => { const m = registry.get(args.id); const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path); exportSTL(m, abs); return { content: [{ type: "text", text: `exported STL to ${abs}` }] }; }
-  );
-  registerTool(
-    { name: "export_gltf", description: "Export model as minimal glTF 2.0", inputSchema: z.object({ id: z.string(), path: z.string() }).strict() },
-    async (args) => { const m = registry.get(args.id); const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path); exportGLTF(m, abs); return { content: [{ type: "text", text: `exported glTF to ${abs}` }] }; }
-  );
-  registerTool(
-    { name: "export_minecraft_schematic", description: "Export model as simple JSON schematic", inputSchema: z.object({ id: z.string(), path: z.string() }).strict() },
+    { name: "export_minecraft_schematic", description: "Export model as a legacy Alpha .schematic (gzip NBT, wool blocks); see export_minecraft_schem for Sponge .schem", inputSchema: z.object({ id: z.string(), path: z.string() }).strict() },
     async (args) => { const m = registry.get(args.id); const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path); exportMinecraftSchematic(m, abs); return { content: [{ type: "text", text: `exported schematic JSON to ${abs}` }] }; }
   );
 
   // Importers
-  registerTool(
-    { name: "import_obj", description: "Import OBJ mesh and voxelize into a model", inputSchema: z.object({ path: z.string(), sizeX: z.number().int().positive(), sizeY: z.number().int().positive(), sizeZ: z.number().int().positive() }).strict() },
-    async (args) => { const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path); const { id, model } = registry.create(args.sizeX, args.sizeY, args.sizeZ); await importOBJ(model, abs); return { content: [{ type: "text", text: JSON.stringify({ id }) }] }; }
-  );
-  registerTool(
-    { name: "import_svg", description: "Import basic SVG shapes (rect/circle) and extrude", inputSchema: z.object({ path: z.string(), sizeX: z.number().int().positive(), sizeY: z.number().int().positive(), sizeZ: z.number().int().positive(), thickness: z.number().int().positive().optional() }).strict() },
-    async (args) => { const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path); const { id, model } = registry.create(args.sizeX, args.sizeY, args.sizeZ); importSVG(model, abs, { thickness: args.thickness ?? 1 }); return { content: [{ type: "text", text: JSON.stringify({ id }) }] }; }
-  );
 
   // Animation
   const anims = new AnimationRegistry();
+  registerFormatTools(registerTool, registry, files, anims);
   registerTool(
     { name: "create_animation", description: "Create a new empty animation", inputSchema: z.object({}).strict() },
     async () => ({ content: [{ type: "text", text: JSON.stringify({ id: anims.create() }) }] })
@@ -1228,10 +1193,6 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   registerTool(
     { name: "export_animation_frames", description: "Export animation frames as separate PNGs", inputSchema: z.object({ animationId: z.string(), folder: z.string(), projection: z.enum(["top","front","side","zmax","isometric"]).optional() }).strict() },
     async (args) => { const frames = anims.getFrames(args.animationId); const abs = path.isAbsolute(args.folder) ? args.folder : path.join(process.cwd(), args.folder); exportAnimationFrames(frames, abs, args.projection ?? "zmax"); return { content: [{ type: "text", text: `exported frames to ${abs}` }] }; }
-  );
-  registerTool(
-    { name: "export_animation_gif", description: "Export an animation as a looping or one-shot GIF using frame durations and palette colors", inputSchema: z.object({ animationId: z.string(), path: z.string(), projection: z.enum(["top","front","side","zmax","isometric"]).optional() }).strict() },
-    async (args) => { const data = anims.getData(args.animationId); exportAnimationGIF(data, args.path, args.projection ?? "isometric"); return { content: [{ type: "text", text: `exported GIF to ${args.path}` }] }; }
   );
 
   // Smart tools
@@ -1328,16 +1289,17 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   registerTool(
     {
       name: "load_vox",
-      description: "Load a .vox file into memory (returns model id)",
-      inputSchema: z.object({ path: z.string() }).strict(),
+      description: "Load a .vox file into memory (returns model id). Files with several models need modelIndex to pick one; use load_vox_models to load all of them",
+      inputSchema: z.object({ path: z.string(), modelIndex: z.number().int().min(0).optional(), lenient: z.boolean().default(false) }).strict(),
     },
     async (args) => {
       const p = args.path as string;
       const abs = path.isAbsolute(p) ? p : path.join(process.cwd(), p);
-      const m = loadVOX(abs);
+      const warnings: string[] = [];
+      const m = loadVOX(abs, args.modelIndex, { lenient: args.lenient, warnings });
       const { id } = registry.create(m.sizeX, m.sizeY, m.sizeZ);
       registry.set(id, m);
-      return { content: [{ type: "text", text: JSON.stringify({ id }) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ id, ...(warnings.length ? { warnings } : {}) }) }] };
     }
   );
 
@@ -1345,34 +1307,16 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   registerTool(
     {
       name: "open_in_magicavoxel",
-      description: "Open a .vox file in MagicaVoxel.exe",
+      description: "Open a .vox file in MagicaVoxel (requires MAGICAVOXEL_PATH or MAGICAVOXEL_HOME)",
       inputSchema: z.object({ path: z.string() }).strict(),
     },
     async (args) => {
-      const exe = config.getMagicaPath();
-      if (!exe) throw new Error("MagicaVoxel executable not configured; set the MAGICAVOXEL_PATH environment variable.");
-      const p = args.path as string;
-      const abs = path.isAbsolute(p) ? p : path.join(process.cwd(), p);
-      if (!fs.existsSync(abs)) throw new Error(`File not found: ${abs}`);
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(exe, [abs], { detached: true, stdio: "ignore", shell: false });
-        child.once("error", reject);
-        child.once("spawn", () => { child.unref(); resolve(); });
-      });
-      return { content: [{ type: "text", text: `opened in MagicaVoxel: ${abs}` }] };
+      const opened = await openVoxFile({ exe: config.getMagicaPath(), file: args.path as string });
+      return { content: [{ type: "text", text: `opened in MagicaVoxel: ${opened}` }] };
     }
   );
 
-  for (const [name, uri, folder, extension] of [
-    ["samples", "magicavoxel:samples", "vox", ".vox"],
-    ["palettes", "magicavoxel:palettes", "palette", ".png"]
-  ] as const) {
-    server.registerResource(name, uri, { mimeType: "application/json", description: `Available ${name} in workspace/${folder}` }, async resourceUri => {
-      const candidate = path.join(files.root, folder);
-      const entries = fs.existsSync(candidate) ? fs.readdirSync(files.resolve(folder, "directory")).filter(f => f.toLowerCase().endsWith(extension)) : [];
-      return { contents: [{ uri: resourceUri.href, mimeType: "application/json", text: JSON.stringify(entries) }] };
-    });
-  }
+  registerInstallTools({ server, register: registerTool, registry, files, config });
 }
 
 // ===== HELPER FUNCTIONS FOR CHARACTER DESCRIPTIONS =====

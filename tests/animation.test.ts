@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PNG } from 'pngjs';
-import { renderFrameToPNG, exportAnimationGIF, exportAnimationFrames, exportAnimationSpriteSheet, interpolateFrames } from '../src/animation.js';
+import { renderFrameToPNG, exportAnimationGIF, gifFrameIndices, exportAnimationFrames, exportAnimationSpriteSheet, interpolateFrames } from '../src/animation.js';
 import type { VoxModelData } from '../src/vox.js';
-const palette = new Uint32Array(256); palette[1] = 0xffff0000; palette[200] = 0xff00ff00;
+const palette = new Uint32Array(256); palette[1] = 0xff0000ff; palette[200] = 0xff00ff00;
 const frame: VoxModelData = {sizeX:2,sizeY:3,sizeZ:4,palette,voxels:[{x:0,y:0,z:0,i:200},{x:0,y:0,z:3,i:1}]};
 const pixel = (png: ReturnType<typeof renderFrameToPNG>,x:number,y:number) => [...png.data.subarray((y*png.width+x)*4,(y*png.width+x)*4+4)];
 // Minimal independent GIF parser/LZW decoder: assertions inspect encoded pixels, not file existence.
@@ -32,7 +32,7 @@ function decodeGIF(bytes: Buffer) {
 }
 const temp = () => fs.mkdtempSync(path.join(process.env.TMPDIR ?? os.tmpdir(),'voxel-animation-'));
 test('interpolation is deterministic coordinate crossfade preserving actual source colors', () => {
- const bPalette=new Uint32Array(palette);bPalette[1]=0xff0000ff;
+ const bPalette=new Uint32Array(palette);bPalette[1]=0xffff0000;
  const a={...frame,voxels:[{x:0,y:0,z:0,i:1}]}; const b={...frame,palette:bPalette,voxels:[{x:0,y:0,z:0,i:1},{x:1,y:1,z:1,i:200}]};
  const result=interpolateFrames(a,b,7);assert.equal(result.length,7);
  assert.deepEqual(result,interpolateFrames(a,b,7));
@@ -89,9 +89,51 @@ test('isometric bounds include tall columns, and depth occludes independent of i
  assert.deepEqual(PNG.sync.write(png),PNG.sync.write(renderFrameToPNG({...f,voxels:f.voxels.toReversed()},'isometric')));
 });
 
-test('orthographic projection uses actual axes, nearest depth and ARGB palette', () => {
+test('orthographic projection uses actual axes, nearest depth and little-endian RGBA palette', () => {
  const top = PNG.sync.read(PNG.sync.write(renderFrameToPNG(frame,'top')));
  assert.deepEqual([top.width,top.height],[2,3]); assert.deepEqual(pixel(top,0,2),[255,0,0,255]);
  const front = renderFrameToPNG(frame,'front'); assert.deepEqual([front.width,front.height],[2,4]); assert.deepEqual(pixel(front,0,0),[255,0,0,255]);
  const side = renderFrameToPNG(frame,'side'); assert.deepEqual([side.width,side.height],[3,4]); assert.deepEqual(pixel(side,0,0),[255,0,0,255]);
+});
+
+function manyColorModel(count: number): VoxModelData {
+  const pal = new Uint32Array(256);
+  const voxels: VoxModelData['voxels'] = [];
+  for (let i = 1; i < 256; i++) pal[i] = (0xff000000 | ((i * 37) & 255) << 16 | ((i * 91) & 255) << 8 | ((i * 53) & 255)) >>> 0;
+  for (let n = 0; n < count; n++) voxels.push({ x: n % 20, y: Math.floor(n / 20), z: 0, i: 1 + (n % 255) });
+  return { sizeX: 20, sizeY: Math.ceil(count / 20), sizeZ: 1, palette: pal, voxels };
+}
+
+test('GIF color reduction: a 300-color image is quantized with a warning, exact frames stay untouched', () => {
+  const png = new PNG({ width: 20, height: 15 });
+  for (let i = 0; i < 300; i++) png.data.set([i % 256, (i * 7) % 256, (i * 13 + 5) % 256, 255], i * 4);
+  assert.throws(() => gifFrameIndices(png), /255 opaque colors/);
+  const q = gifFrameIndices(png, { quantize: 'median-cut', maxColors: 16 });
+  assert.equal(q.palette.length, 17);
+  assert.equal(q.indices.length, 300);
+  assert.ok(q.indices.every(i => i >= 1 && i < q.palette.length));
+  assert.match(q.warnings[0]!, /median-cut/);
+  const d = gifFrameIndices(png, { quantize: 'median-cut', dither: 'floyd', maxColors: 16 });
+  assert.match(d.warnings[0]!, /Floyd/);
+  assert.notDeepEqual([...d.indices], [...q.indices]);
+  const exact = new PNG({ width: 2, height: 1 });
+  exact.data.set([1, 2, 3, 255, 0, 0, 0, 0]);
+  const e = gifFrameIndices(exact, { quantize: 'median-cut', dither: 'floyd' });
+  assert.deepEqual(e.warnings, []);
+  assert.deepEqual([...e.indices], [1, 0]);
+});
+
+test('GIF export with maxColors reduces a frame palette, reports warnings and still decodes', () => {
+  const dir = temp(); try {
+    const file = path.join(dir, 'many.gif');
+    const model = manyColorModel(100);
+    assert.throws(() => exportAnimationGIF([model], file, 'zmax', { maxColors: 8 }), /8 opaque colors/);
+    const result = exportAnimationGIF([model], file, 'zmax', { maxColors: 8, quantize: 'median-cut', dither: 'floyd' });
+    assert.equal(result.frames, 1);
+    assert.ok(result.warnings.length === 1 && /median-cut/.test(result.warnings[0]!));
+    const decoded = decodeGIF(fs.readFileSync(file));
+    assert.equal(new Set(decoded.frames[0]!.pixels.filter(p => p[3] === 255).map(p => p.join(','))).size <= 8, true);
+    const plain = exportAnimationGIF([manyColorModel(10)], file);
+    assert.deepEqual(plain.warnings, []);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

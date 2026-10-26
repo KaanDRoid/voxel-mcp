@@ -1,5 +1,6 @@
 import fs from "fs";
 import { PNG } from "pngjs";
+import { readPngBounded } from "./png.js";
 import { loadImage, readImageBuffer } from "./image.js";
 import { defaultPalette, type VoxModelData } from "./vox.js";
 
@@ -10,7 +11,7 @@ export function setPaletteIndex(model: VoxModelData, index: number, rgba: number
 
 export function loadPaletteFromPng(model: VoxModelData, path: string) {
   const buf = readImageBuffer(path);
-  const png = PNG.sync.read(buf);
+  const png = readPngBounded(buf);
   if (png.width * png.height < 256) throw new Error("Palette PNG must have at least 256 pixels");
   if (!model.palette) model.palette = defaultPalette();
   for (let i = 0; i < 256; i++) {

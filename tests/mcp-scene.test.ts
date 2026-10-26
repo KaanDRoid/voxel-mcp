@@ -46,7 +46,21 @@ test('scene tools retain models, transforms, layers and materials through the ac
     assert.equal(invalid.isError, true);
     const unchanged = await call('get_scene_info', { sceneId });
     assert.equal(unchanged.nodes.find((n: { id: number }) => n.id === node.id).frames[0]._t, '16 4 0');
+    const multi = await call('load_vox_models', { path: 'out/city.vox' });
+    assert.equal(multi.models.length, 2);
+    assert.equal((await call('get_model_info', { id: multi.models[1].id })).voxelCount, 1);
+    const flat = await call('flatten_scene', { sceneId: multi.sceneId });
+    assert.equal(flat.instances, 2);
+    assert.equal(flat.models.length, 1);
+    const baked = await call('extract_scene_model', { sceneId: multi.sceneId, modelIndex: 0, bake: true });
+    assert.equal(baked.origin.length, 3);
+    const refused = await client.callTool({ name: 'load_vox', arguments: { path: 'out/city.vox' } });
+    assert.equal(refused.isError, true);
+    assert.match((refused.content as { text: string }[])[0]!.text, /load_vox_models/);
+    assert.equal((await call('load_vox', { path: 'out/city.vox', modelIndex: 1 })).id.length > 0, true);
+    const strictFail = await client.callTool({ name: 'load_scene', arguments: { path: 'out/city.vox', unknown: 1 } });
+    assert.equal(strictFail.isError, true);
     await call('delete_scene', { sceneId });
-    assert.equal((await call('list_scenes')).length, 1);
+    assert.equal((await call('list_scenes')).length, 2);
   } finally { await client.close(); await transport.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { FORMAT_CREATING_TOOLS, formatToolArgs, writeFormatFixtures } from './helpers/formatCatalog.js';
 
 type Schema = { type?: string; enum?: unknown[]; const?: unknown; default?: unknown; minimum?: number; exclusiveMinimum?: number; minItems?: number; maxItems?: number; items?: Schema; prefixItems?: Schema[]; properties?: Record<string, Schema>; required?: string[]; anyOf?: Schema[] };
 function example(schema: Schema): unknown {
@@ -21,6 +22,8 @@ function example(schema: Schema): unknown {
   return 'test';
 }
 
+// Installation tools need a MagicaVoxel folder; tests/mcp-install.test.ts covers them over stdio.
+const SKIPPED = ['undo', 'redo', 'batch_edit', 'delete_animation', 'get_magicavoxel_info', 'list_magicavoxel_samples', 'list_magicavoxel_palettes', 'list_magicavoxel_shaders', 'list_magicavoxel_ibl', 'load_magicavoxel_sample'];
 const entry = fileURLToPath(new URL('../dist/index.js', import.meta.url));
 test('every non-scene modeling tool is exercised over stdio with real fixtures', { timeout: 120000 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'voxel-catalog-'));
@@ -29,6 +32,7 @@ test('every non-scene modeling tool is exercised over stdio with real fixtures',
   fs.writeFileSync(path.join(root, 'image.png'), PNG.sync.write(png));
   fs.writeFileSync(path.join(root, 'mesh.obj'), 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n');
   fs.writeFileSync(path.join(root, 'shape.svg'), '<svg width="16" height="16"><rect x="2" y="2" width="8" height="8" fill="#ff0000"/></svg>');
+  writeFormatFixtures(root);
   const transport = new StdioClientTransport({ command: process.execPath, args: [entry], cwd: root, stderr: 'pipe' });
   const client = new Client({ name: 'catalog-test', version: '1.0.0' });
   const tested = new Set<string>();
@@ -51,7 +55,8 @@ test('every non-scene modeling tool is exercised over stdio with real fixtures',
     const templateId = id;
     const { tools } = await client.listTools();
     for (const tool of tools) {
-      if (tool.name.includes('scene') || ['undo', 'redo', 'batch_edit', 'delete_animation'].includes(tool.name)) continue;
+      if (tool.name.includes('scene') || tool.name.includes('xs_shader') || SKIPPED.includes(tool.name)) continue;
+
       id = parse(await call('clone_model', { id: templateId })).id as string;
       const args = example(tool.inputSchema as Schema) as Record<string, unknown>;
       Object.assign(args, Object.fromEntries(Object.entries({ id, a: id, b: other, animationId, sizeX: 32, sizeY: 32, sizeZ: 32, seed: 7, scaleX: 1, scaleY: 1, scaleZ: 1, x: 8, y: 8, z: 8, cx: 8, cy: 8, cz: 8, r: 3, majorR: 4, minorR: 2, height: 4, floors: 1, i: 20, index: 0, from: 0, to: 1 }).filter(([key]) => key in (tool.inputSchema.properties ?? {}))));
@@ -65,7 +70,8 @@ test('every non-scene modeling tool is exercised over stdio with real fixtures',
       if (tool.name.startsWith('export_') || tool.name.startsWith('save_')) {
         if ('path' in args) args.path = `out/${tool.name}.${tool.name.includes('gltf') ? 'gltf' : tool.name.includes('gif') ? 'gif' : tool.name.includes('png') || tool.name.includes('spritesheet') ? 'png' : tool.name.includes('minecraft') ? 'json' : tool.name.split('_').at(-1)}`;
         if ('folder' in args) args.folder = `out/${tool.name}`;
-      } else if ('path' in args) args.path = tool.name === 'load_vox' || tool.name === 'open_in_magicavoxel' ? 'input.vox' : tool.name === 'import_obj' ? 'mesh.obj' : tool.name === 'import_svg' ? 'shape.svg' : 'image.png';
+      } else if ('path' in args) args.path = ['load_vox', 'load_vox_models', 'open_in_magicavoxel'].includes(tool.name) ? 'input.vox' : tool.name === 'import_obj' ? 'mesh.obj' : tool.name === 'import_svg' ? 'shape.svg' : 'image.png';
+      Object.assign(args, formatToolArgs(tool.name, { id, other }));
       for (const key of ['frontPath', 'sidePath', 'topPath']) if (key in (tool.inputSchema.properties ?? {}) && tool.name === 'multi_view_to_voxel') args[key] = 'image.png';
       if (tool.name === 'open_in_magicavoxel') {
         const result = await client.callTool({ name: tool.name, arguments: args });
@@ -78,6 +84,7 @@ test('every non-scene modeling tool is exercised over stdio with real fixtures',
           const createdId = parse(result).id;
           if (createdId && createdId !== id && createdId !== other) await call('delete_model', { id: createdId });
         }
+        if (FORMAT_CREATING_TOOLS.has(tool.name)) await call('delete_model', { id: parse(result).id });
         if (tool.name === 'delete_model') {
           // Deletion itself was verified; stop reusing this fixture by restoring it through undo.
           await call('undo');
@@ -86,7 +93,8 @@ test('every non-scene modeling tool is exercised over stdio with real fixtures',
       await call('delete_model', { id });
       tested.add(tool.name);
     }
-    const expected = tools.filter(t => !t.name.includes('scene') && !['undo', 'redo', 'batch_edit', 'delete_animation'].includes(t.name)).map(t => t.name).sort();
+    const expected = tools.filter(t => !t.name.includes('scene') && !t.name.includes('xs_shader') && !SKIPPED.includes(t.name)).map(t => t.name).sort();
+
     assert.deepEqual([...tested].sort(), expected);
     console.log(`Exercised ${tested.size} tool handlers over stdio`);
   } finally { await client.close(); await transport.close(); fs.rmSync(root, { recursive: true, force: true }); }
