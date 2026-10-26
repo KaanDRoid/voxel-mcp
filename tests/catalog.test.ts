@@ -67,7 +67,7 @@ test('every non-scene modeling tool is exercised over stdio with real fixtures',
       if (tool.name.startsWith('export_') || tool.name.startsWith('save_')) {
         if ('path' in args) args.path = `out/${tool.name}.${tool.name.includes('gltf') ? 'gltf' : tool.name.includes('gif') ? 'gif' : tool.name.includes('png') || tool.name.includes('spritesheet') ? 'png' : tool.name.includes('minecraft') ? 'json' : tool.name.split('_').at(-1)}`;
         if ('folder' in args) args.folder = `out/${tool.name}`;
-      } else if ('path' in args) args.path = tool.name === 'load_vox' || tool.name === 'open_in_magicavoxel' ? 'input.vox' : tool.name === 'import_obj' ? 'mesh.obj' : tool.name === 'import_svg' ? 'shape.svg' : 'image.png';
+      } else if ('path' in args) args.path = ['load_vox', 'load_vox_models', 'open_in_magicavoxel'].includes(tool.name) ? 'input.vox' : tool.name === 'import_obj' ? 'mesh.obj' : tool.name === 'import_svg' ? 'shape.svg' : 'image.png';
       for (const key of ['frontPath', 'sidePath', 'topPath']) if (key in (tool.inputSchema.properties ?? {}) && tool.name === 'multi_view_to_voxel') args[key] = 'image.png';
       if (tool.name === 'open_in_magicavoxel') {
         const result = await client.callTool({ name: tool.name, arguments: args });
