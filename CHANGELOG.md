@@ -14,9 +14,7 @@ Breaking renames (the package was never published, so no aliases are provided):
 - Tool `generate_ankara_block` -> `generate_city_block`.
 - Tool `open_in_magica` -> `open_in_magicavoxel`.
 - Resource URIs `magica:models`, `magica:vox/{folder}`, `magica:samples`, `magica:palettes` -> `magicavoxel:models`, `magicavoxel:vox/{folder}`, `magicavoxel:samples`, `magicavoxel:palettes`.
-- `generate_venue_character` `role`: `konsomatris` -> `hostess`, `musteri` -> `customer`, `garson` -> `waiter`, `asci` -> `cook`, `polis` -> `police_officer`, `mafya` -> `gangster`, `behzatc` -> `detective`.
-- `generate_staff` `type`: `barman` -> `bartender`, `konsomatris` -> `hostess`.
-- `generate_customer` `type`: `nostalgic` -> `retiree`, `sapkali` -> `farmer`, `behzatc` -> `detective`.
+- `generate_venue_character` `role`, `generate_staff` `type` and `generate_customer` `type` now use neutral English values (for example `hostess`, `customer`, `waiter`, `cook`, `police_officer`, `gangster`, `detective`, `bartender`, `retiree`, `farmer`). See each tool's input schema for the full list.
 - Prompt-based generation now recognizes English keywords only (`house`, `building`, `home`, `cottage`, `N floors`/`N storeys`, `character`, `humanoid`, `person`, `robot`, `sphere`, `ball`, `globe`).
 - All tool descriptions, error messages, comments, tests and documentation are now English and culturally neutral.
 
@@ -27,4 +25,14 @@ Breaking renames (the package was never published, so no aliases are provided):
 
 ## [1.1.0]
 
-- Initial feature-complete release: procedural generators, scene and animation tools, importers and exporters.
+### Fixed
+
+- The server now starts against the current MCP SDK, with working tool, resource and prompt registration.
+- The VOX reader traverses the MAIN chunk correctly and validates its input; the official default palette is used.
+
+### Added
+
+- Multi-model scenes with transform, group, shape, layer and material metadata; unknown chunks are preserved.
+- Undo/redo with transactional rollback, workspace-confined file access and input limits.
+- `render_model` PNG previews, GIF export, and glTF/OBJ/STL/PLY/NBT-schematic export corrections.
+- Test suite (including real stdio MCP sessions) and continuous integration.
