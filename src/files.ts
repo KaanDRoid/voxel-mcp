@@ -9,11 +9,39 @@ export class FilePolicy {
     if (!fs.statSync(this.root).isDirectory()) throw new Error("Workspace must be a directory");
   }
 
+  private readonly readRoots: { dir: string; allowExt: Set<string> }[] = [];
+
+  private static isInside(base: string, candidate: string): boolean {
+    const relative = path.relative(base, candidate);
+    return !(relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative));
+  }
+
   private assertInside(candidate: string): void {
-    const relative = path.relative(this.root, candidate);
-    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-      throw new Error("Path is outside the configured workspace");
-    }
+    if (!FilePolicy.isInside(this.root, candidate)) throw new Error("Path is outside the configured workspace");
+  }
+
+  /**
+   * Allow reading (never writing) files with the given extensions from a folder outside the workspace.
+   * Only absolute paths reach a read root; executables and libraries can never be allowed.
+   */
+  addReadRoot(dir: string, options: { allowExt: string[] }): void {
+    const allowExt = new Set(options.allowExt.map(e => e.toLowerCase()));
+    if ([...allowExt].some(e => /^\.(exe|dll|bat|cmd|com|msi|ps1|sh|so|dylib|app)$/.test(e) || !/^\.[a-z0-9]+$/.test(e))) throw new Error("Executable or invalid extensions cannot be allowed on a read root");
+    const real = fs.realpathSync(path.resolve(dir));
+    if (!fs.statSync(real).isDirectory()) throw new Error("Read root must be a directory");
+    this.readRoots.push({ dir: real, allowExt });
+  }
+
+  private resolveReadRoot(candidate: string): string | undefined {
+    const root = this.readRoots.find(r => FilePolicy.isInside(r.dir, candidate) && candidate !== r.dir);
+    if (!root) return undefined;
+    if (!root.allowExt.has(path.extname(candidate).toLowerCase())) throw new Error("This file type is not readable from a read-only root");
+    const real = fs.realpathSync(candidate);
+    if (!FilePolicy.isInside(root.dir, real) || !root.allowExt.has(path.extname(real).toLowerCase())) throw new Error("Path is outside the configured workspace");
+    const stat = fs.statSync(real);
+    if (!stat.isFile()) throw new Error("Input path must be a regular file");
+    if (stat.size > this.maxInputBytes) throw new Error("Input file exceeds the size limit");
+    return candidate;
   }
 
   resolve(value: string, mode: "read" | "write" | "directory" | "outputDirectory"): string {
@@ -21,6 +49,10 @@ export class FilePolicy {
     if (process.platform === "win32" && /:/.test(value.replace(/^[A-Za-z]:[\\/]/, ""))) throw new Error("Invalid file path");
     if (process.platform === "win32" && value.split(/[\\/]/).some(part => /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(part))) throw new Error("Reserved device name");
     const candidate = path.resolve(this.root, value);
+    if (mode === "read" && path.isAbsolute(value) && !FilePolicy.isInside(this.root, candidate)) {
+      const viaRoot = this.resolveReadRoot(candidate);
+      if (viaRoot) return viaRoot;
+    }
     this.assertInside(candidate);
     let existing = candidate;
     while (!fs.existsSync(existing)) {

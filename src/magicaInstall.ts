@@ -71,3 +71,14 @@ export function resolveInstall(env: Record<string, string | undefined> = process
 export function tryResolveInstall(env: Record<string, string | undefined> = process.env): { install?: MagicaInstall; error?: string } {
   try { return { install: resolveInstall(env) }; } catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
 }
+
+/** Read-only roots to hand to FilePolicy.addReadRoot: sample, palette, shader and IBL folders plus the config text files. */
+export function installReadRoots(install: MagicaInstall): { dir: string; allowExt: string[] }[] {
+  return [
+    { dir: install.dirs.vox, allowExt: [".vox"] },
+    { dir: install.dirs.palette, allowExt: [".png"] },
+    { dir: install.dirs.shader, allowExt: [".txt"] },
+    { dir: install.dirs.ibl, allowExt: [".hdr"] },
+    { dir: install.dirs.config, allowExt: [".txt"] }
+  ];
+}
