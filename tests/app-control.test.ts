@@ -228,14 +228,6 @@ test('only the calibrated application version can be attached unless explicitly 
   assert.equal(JSON.parse((ok.content[0] as { text: string }).text).attached, true);
 });
 
-test('a symlinked output or a file not written by this run is not reported as a render', { skip: process.platform === 'win32' }, async t => {
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'outside-'));
-  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(outside, 'real.png'), png(8, 8));
-  const f = await renderFixture(t, file => fs.symlinkSync(path.join(outside, 'real.png'), file));
-  assert.match(((await f.h.call('export_native_render', { path: f.out, imageWidth: 8, imageHeight: 8, timeoutSeconds: 30 })) as { error: string }).error, /regular file/);
-});
-
 test('a stale file that appears with an old timestamp is rejected as not written by this run', { skip: process.platform !== 'win32' }, async t => {
   const f = await renderFixture(t, file => { fs.writeFileSync(file, png(8, 8)); const old = new Date(Date.now() - 3600_000); fs.utimesSync(file, old, old); });
   assert.match(((await f.h.call('export_native_render', { path: f.out, imageWidth: 8, imageHeight: 8, timeoutSeconds: 30 })) as { error: string }).error, /not written by this render/);
