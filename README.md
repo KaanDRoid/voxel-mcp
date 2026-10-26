@@ -12,7 +12,8 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 - **Generators**: houses, characters, vehicles, furniture, weapons, structures, creatures, nature, terrain, trees, and city/venue helpers. Output is deterministic for a given seed.
 - **Images**: colorized voxelization, silhouettes, depth maps, edge detection and multi-view carving from PNG/JPEG.
 - **Animation**: frame registry, deterministic dissolve between frames, sprite sheets, PNG frame folders, and GIF with per-frame timing and loop setting.
-- **Export/import**: VOX, OBJ, PLY, STL, glTF 2.0 (embedded), PNG slices, legacy Minecraft `.schematic` (gzip NBT, wool-color approximation); OBJ and basic SVG import.
+- **Palettes**: load and save MagicaVoxel palette PNGs (`import_palette_png`, `export_palette_png`), Adobe `.act` and palette-only VOX files; `remap_model_to_palette`, `quantize_model`, `sort_palette`, `find_nearest_color` and `merge_palettes` work in CIE Lab and report the color error.
+- **Export/import**: VOX, OBJ (basic or MagicaVoxel profile with `.mtl` and palette texture), PLY, STL, glTF 2.0 (embedded), PNG slices, Qubicle `.qb`, XRAW, Slab6 VOX, Sponge `.schem` (v2/v3) and legacy Minecraft `.schematic`; OBJ import with solid fill and colors, SVG import with paths, fills and transforms.
 
 ## Requirements
 
@@ -57,6 +58,13 @@ Models are at most 256 voxels per axis (the VOX limit) and 2,000,000 voxels each
 - Palettes are 256 `uint32` values in little-endian RGBA byte order (`0xAABBGGRR`).
 - Scene model IDs are zero-based positions in the scene's model list.
 
+## Format notes
+
+- Mesh exports (`export_obj`, `export_ply`, `export_stl`, `export_gltf`) take `scale` (output units per voxel) and `axis`. An axis is three signed letters: `XYZ` keeps Z up (STL default), `XZ-Y` is Y up (OBJ and glTF default; a rotation, so faces keep their winding). `export_obj` with `profile: "magica"` uses the `io_obj` defaults of MagicaVoxel (`scale` 0.1, merged faces) and writes `<name>.mtl` and `<name>.png` beside the OBJ.
+- Palette PNG, ACT and palette-VOX files store slot k for voxel index k+1 and slot 255 for index 0, like MagicaVoxel's own `palette/pal*.png`. The older `load_palette_from_png` / `save_palette_to_png` tools map pixel k to index k instead; prefer the `*_palette_png` tools for MagicaVoxel palettes.
+- `import_obj` reads `.mtl` files and PNG textures from inside the workspace only. Closed meshes are filled with the voxels whose centers are inside; faces exactly on voxel boundaries are handled by that fill. Open meshes keep only their surface and report a warning.
+- Qubicle, XRAW, Slab6 and `.schem` layouts follow public format descriptions and are covered by byte-level tests; the axis mapping to the original applications is unverified. Slab6 VOX is the Slab6/SLABSPRI grid format, not the MagicaVoxel container.
+
 ## Example
 
 ```text
@@ -77,8 +85,10 @@ npm run check       # typecheck, tests and npm audit
 
 ## Known limitations
 
-- OBJ import samples surfaces (no solid fill); SVG import supports unstyled `<rect>` and `<circle>` only.
-- GIF frames are limited to 255 opaque colors with on/off transparency.
+- OBJ import fills closed meshes only; thin features narrower than a voxel can vanish in solid mode (use `fill: "surface"`).
+- SVG import is fill-only: strokes, text, gradients, CSS classes, clipping, opacity, `use` and elliptical arcs raise an "unsupported SVG" error.
+- GIF frames are limited to 255 opaque colors with on/off transparency; use `quantize: "median-cut"` (and optionally `dither: "floyd"`) to reduce colors instead of failing.
+- OBJ, PLY, MC-style and other MagicaVoxel exports have not been compared against the application's own output (parity unverified).
 - MagicaVoxel is launched with a file but is not remotely controlled.
 
 ## License

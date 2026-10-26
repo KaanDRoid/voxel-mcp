@@ -43,7 +43,7 @@ test('Sponge schematic v3 has the documented structure, varint block data and Y-
   assert.deepEqual(s.Offset, [0, 0, 0]);
   const palette = s.Blocks.Palette as Record<string, number>;
   assert.equal(palette['minecraft:air'], 0);
-  assert.ok(palette['minecraft:red_wool'] > 0);
+  assert.ok(palette['minecraft:red_wool']! > 0);
   const data = s.Blocks.Data as Buffer;
   assert.equal(data.length, 2 * 4 * 3);
   // index = (y * Length + z) * Width + x, with Minecraft z = (voxel sizeY - 1 - voxel y)
