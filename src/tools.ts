@@ -20,6 +20,7 @@ import { spawn } from "child_process";
 import { PNG } from "pngjs";
 import { FilePolicy } from "./files.js";
 import { registerSceneTools } from "./sceneTools.js";
+import { registerXsTools, XS_READ_ONLY_TOOLS } from "./xsTools.js";
 
 // Clipboard for copy/paste operations
 
@@ -29,6 +30,7 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   const files = new FilePolicy();
   let pending: Promise<unknown> = Promise.resolve();
   const readOnly = new Set(["list_models", "get_model_info", "measure_distance", "get_surface_area", "get_volume", "find_center", "get_dimensions", "count_colors", "detect_symmetry", "render_model", "copy_region", "list_scenes", "get_scene_info"]);
+  for (const name of XS_READ_ONLY_TOOLS) readOnly.add(name);
   function registerTool<T extends z.ZodRawShape>(definition: { name: string; description: string; inputSchema: z.ZodObject<T> }, handler: (args: z.infer<z.ZodObject<T>>) => Promise<CallToolResult>) {
     const { name, ...schema } = definition;
     server.registerTool(name, { ...schema, annotations: { readOnlyHint: readOnly.has(name), destructiveHint: !readOnly.has(name), openWorldHint: name === "open_in_magicavoxel" } }, async args => {
@@ -42,12 +44,12 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
             if (Array.isArray(value) && value.length > 262144) throw new Error(`${key} exceeds the array limit`);
             if (/^(x[01]?|y[01]?|z[01]?|c[xyz]|d[xyz]|offset[XYZ])$/.test(key) && typeof value === "number" && Math.abs(value) > 4096) throw new Error(`${key} exceeds the coordinate limit`);
             if (typeof value === "string" && ["path", "folder", "frontPath", "sidePath", "topPath"].includes(key)) {
-              parameters[key] = name.startsWith("export_") || name.startsWith("save_")
+              parameters[key] = /^(export_|save_|write_)/.test(name)
                 ? files.prepareOutput(value, key === "folder") : files.resolve(value, "read");
               if (key === "folder" && fs.readdirSync(parameters[key] as string).some(f => fs.lstatSync(path.join(parameters[key] as string, f)).isSymbolicLink())) throw new Error("Output directory contains symbolic links");
             }
           }
-          const modelMutation = !readOnly.has(name) && !/^(export_|save_)/.test(name) && !name.includes("scene") && !name.includes("animation") && !["undo", "redo", "open_in_magicavoxel", "add_frame", "set_frame_duration", "duplicate_frame", "remove_frame", "reorder_frame", "interpolate_frames"].includes(name);
+          const modelMutation = !readOnly.has(name) && !/^(export_|save_|write_)/.test(name) && !name.includes("scene") && !name.includes("animation") && !["undo", "redo", "open_in_magicavoxel", "add_frame", "set_frame_duration", "duplicate_frame", "remove_frame", "reorder_frame", "interpolate_frames"].includes(name);
           return modelMutation
             ? await registry.transaction(() => handler(parameters as z.infer<z.ZodObject<T>>))
             : await handler(parameters as z.infer<z.ZodObject<T>>);
@@ -64,6 +66,7 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   registerTool({ name: "redo", description: "Redo the last undone model-registry edit", inputSchema: z.object({}).strict() }, async () => ({ content: [{ type: "text", text: JSON.stringify({ changed: registry.redo() }) }] }));
 
   registerSceneTools(registerTool, registry);
+  registerXsTools(registerTool, registry, config, files);
 
   // create_model
   registerTool(

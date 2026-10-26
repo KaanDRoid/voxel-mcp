@@ -51,7 +51,7 @@ test('every non-scene modeling tool is exercised over stdio with real fixtures',
     const templateId = id;
     const { tools } = await client.listTools();
     for (const tool of tools) {
-      if (tool.name.includes('scene') || ['undo', 'redo', 'batch_edit', 'delete_animation'].includes(tool.name)) continue;
+      if (tool.name.includes('scene') || tool.name.includes('xs_shader') || ['undo', 'redo', 'batch_edit', 'delete_animation'].includes(tool.name)) continue;
       id = parse(await call('clone_model', { id: templateId })).id as string;
       const args = example(tool.inputSchema as Schema) as Record<string, unknown>;
       Object.assign(args, Object.fromEntries(Object.entries({ id, a: id, b: other, animationId, sizeX: 32, sizeY: 32, sizeZ: 32, seed: 7, scaleX: 1, scaleY: 1, scaleZ: 1, x: 8, y: 8, z: 8, cx: 8, cy: 8, cz: 8, r: 3, majorR: 4, minorR: 2, height: 4, floors: 1, i: 20, index: 0, from: 0, to: 1 }).filter(([key]) => key in (tool.inputSchema.properties ?? {}))));
@@ -86,7 +86,7 @@ test('every non-scene modeling tool is exercised over stdio with real fixtures',
       await call('delete_model', { id });
       tested.add(tool.name);
     }
-    const expected = tools.filter(t => !t.name.includes('scene') && !['undo', 'redo', 'batch_edit', 'delete_animation'].includes(t.name)).map(t => t.name).sort();
+    const expected = tools.filter(t => !t.name.includes('scene') && !t.name.includes('xs_shader') && !['undo', 'redo', 'batch_edit', 'delete_animation'].includes(t.name)).map(t => t.name).sort();
     assert.deepEqual([...tested].sort(), expected);
     console.log(`Exercised ${tested.size} tool handlers over stdio`);
   } finally { await client.close(); await transport.close(); fs.rmSync(root, { recursive: true, force: true }); }

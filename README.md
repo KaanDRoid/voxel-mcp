@@ -12,6 +12,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 - **Generators**: houses, characters, vehicles, furniture, weapons, structures, creatures, nature, terrain, trees, and city/venue helpers. Output is deterministic for a given seed.
 - **Images**: colorized voxelization, silhouettes, depth maps, edge detection and multi-view carving from PNG/JPEG.
 - **Animation**: frame registry, deterministic dissolve between frames, sprite sheets, PNG frame folders, and GIF with per-frame timing and loop setting.
+- **xs shaders**: `list_xs_shaders`, `read_xs_shader`, `validate_xs_shader`, `write_xs_shader` (workspace only), `generate_xs_shader_template` and `run_xs_shader`. Shaders are read from the workspace or from the `shader` folder of the MagicaVoxel install (`MAGICAVOXEL_HOME`, or the folder of `MAGICAVOXEL_PATH`); the install folder is never written. `run_xs_shader` uses a built-in sandboxed interpreter for a documented GLSL subset (no code is evaluated by the JavaScript engine) and is undoable. See `docs/xs-shader-evaluation.md`.
 - **Export/import**: VOX, OBJ, PLY, STL, glTF 2.0 (embedded), PNG slices, legacy Minecraft `.schematic` (gzip NBT, wool-color approximation); OBJ and basic SVG import.
 
 ## Requirements
@@ -46,10 +47,13 @@ Point your MCP client at `dist/index.js` (see [client-config](client-config/READ
 |---|---|
 | `MAGICVOXEL_MCP_WORKSPACE` | Directory for all reads and writes. Defaults to the server's working directory. Paths that escape it, including through symlinks, are rejected. |
 | `MAGICAVOXEL_PATH` | Absolute path to `MagicaVoxel.exe` or `MagicaVoxel`, enabling `open_in_magicavoxel`. |
+| `MAGICAVOXEL_HOME` | MagicaVoxel install folder; its `shader` folder is readable by the xs shader tools. Defaults to the folder of `MAGICAVOXEL_PATH`. |
 
 ## Limits
 
 Models are at most 256 voxels per axis (the VOX limit) and 2,000,000 voxels each. The registry holds up to 64 models and 8,000,000 voxels with a bounded undo history. Input files are limited to 64 MiB; images to 32 MiB and about 4.2 million pixels. Oversized or malformed input returns a tool error.
+
+xs shader runs are limited to 200,000 interpreter steps per voxel, 4,096 iterations per loop, shader sources of 64 KiB and a wall-clock limit (default 20 s, at most 120 s). Dense shaders with long loops (for example the shipped Mandelbulb) take about a minute at 128^3 and are best run on smaller volumes.
 
 ## Conventions
 
