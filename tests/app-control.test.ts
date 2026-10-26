@@ -140,7 +140,7 @@ async function renderFixture(t: TestContext, produce: (file: string) => void) {
   return { h, out, steps };
 }
 
-test('a native render is reported only after the finished PNG has the requested size', async t => {
+test('a native render is reported only after the finished PNG has the requested size', { skip: process.platform !== 'win32' }, async t => {
   const f = await renderFixture(t, file => fs.writeFileSync(file, png(64, 48)));
   const result = await f.h.call('export_native_render', { path: f.out, imageWidth: 64, imageHeight: 48, timeoutSeconds: 30 });
   assert.ok(result.ok, 'error' in result ? result.error : 'ok');
@@ -152,7 +152,7 @@ test('a native render is reported only after the finished PNG has the requested 
   assert.equal(f.steps[0]!.at(-1)!.path, f.out.replace(/\//g, '\\'));
 });
 
-test('a wrong-sized, truncated or corrupt render is an error', async t => {
+test('a wrong-sized, truncated or corrupt render is an error', { skip: process.platform !== 'win32' }, async t => {
   const wrong = await renderFixture(t, file => fs.writeFileSync(file, png(10, 10)));
   assert.match(((await wrong.h.call('export_native_render', { path: wrong.out, imageWidth: 64, imageHeight: 48, timeoutSeconds: 30 })) as { error: string }).error, /10x10, not the requested 64x48/);
 
@@ -163,7 +163,7 @@ test('a wrong-sized, truncated or corrupt render is an error', async t => {
   assert.match(((await corrupt.h.call('export_native_render', { path: corrupt.out, imageWidth: 64, imageHeight: 48, timeoutSeconds: 30 })) as { error: string }).error, /bad checksum|PNG/);
 });
 
-test('rendering refuses existing files, other extensions and absent output', async t => {
+test('rendering refuses existing files, other extensions and absent output', { skip: process.platform !== 'win32' }, async t => {
   const f = await renderFixture(t, () => {});
   fs.writeFileSync(f.out, 'old');
   assert.match(((await f.h.call('export_native_render', { path: f.out, imageWidth: 8, imageHeight: 8 })) as { error: string }).error, /already exists/);
@@ -192,7 +192,7 @@ test('over the real protocol the shared parameter limits do not reject a full-si
     const result = await client.callTool({ name: 'export_native_render', arguments: { path: 'out/render.png', imageWidth: 1920, imageHeight: 1080 } });
     assert.equal(result.isError, true);
     const message = (result.content as { text: string }[])[0]!.text;
-    assert.match(message, /MAGICVOXEL_MCP_UI_AUTOMATION=1/);
+    assert.match(message, process.platform === 'win32' ? /MAGICVOXEL_MCP_UI_AUTOMATION=1/ : /only available on Windows/);
     assert.doesNotMatch(message, /exceeds/);
   } finally { await client.close(); await transport.close(); }
 });
@@ -203,7 +203,7 @@ test('the output path typed into the dialog must be a plain absolute path', () =
   for (const bad of ['night.png', '\\\\server\\share\\a.png', 'C:\\a\r\n.png', 'C:\\%TEMP%\\a.png', 'C:\\a*.png', 'C:\\a\\b:c.png', 'C:\\' + 'x'.repeat(260)]) assert.throws(() => checkTypablePath(bad), /absolute path|too long/, bad);
 });
 
-test('a render path with unsafe characters is rejected before any input is sent', async t => {
+test('a render path with unsafe characters is rejected before any input is sent', { skip: process.platform !== 'win32' }, async t => {
   let calls = 0;
   const f = await renderFixture(t, () => { calls++; });
   const before = f.steps.length;
@@ -236,7 +236,7 @@ test('a symlinked output or a file not written by this run is not reported as a 
   assert.match(((await f.h.call('export_native_render', { path: f.out, imageWidth: 8, imageHeight: 8, timeoutSeconds: 30 })) as { error: string }).error, /regular file/);
 });
 
-test('a stale file that appears with an old timestamp is rejected as not written by this run', async t => {
+test('a stale file that appears with an old timestamp is rejected as not written by this run', { skip: process.platform !== 'win32' }, async t => {
   const f = await renderFixture(t, file => { fs.writeFileSync(file, png(8, 8)); const old = new Date(Date.now() - 3600_000); fs.utimesSync(file, old, old); });
   assert.match(((await f.h.call('export_native_render', { path: f.out, imageWidth: 8, imageHeight: 8, timeoutSeconds: 30 })) as { error: string }).error, /not written by this render/);
 });
