@@ -10,7 +10,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 const entry = fileURLToPath(new URL('../dist/index.js', import.meta.url));
 
 test('stdio discovery, model editing, resources and prompts work through a real client', { timeout: 20000 }, async () => {
-  const workspace = mkdtempSync(path.join(tmpdir(), 'voxel-mcp-'));
+  const workspace = mkdtempSync(path.join(tmpdir(), 'magicvoxel-mcp-'));
   const transport = new StdioClientTransport({ command: process.execPath, args: [entry], cwd: workspace, stderr: 'pipe' });
   const client = new Client({ name: 'integration-test', version: '1.0.0' });
   try {
@@ -41,8 +41,8 @@ test('stdio discovery, model editing, resources and prompts work through a real 
     assert.equal(JSON.parse((cleared.content as { text: string }[])[0]!.text).voxelCount, 0);
     await call('undo');
     const resources = await client.listResources();
-    assert.ok(resources.resources.some(r => r.uri === 'magica:models'));
-    const models = await client.readResource({ uri: 'magica:models' });
+    assert.ok(resources.resources.some(r => r.uri === 'magicavoxel:models'));
+    const models = await client.readResource({ uri: 'magicavoxel:models' });
     assert.ok(models.contents.length);
     const prompts = await client.listPrompts();
     assert.ok(prompts.prompts.some(p => p.name === 'make_house'));

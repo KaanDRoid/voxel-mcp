@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "magicvoxel-mcp": {
+      "command": "node",
+      "args": ["C:/path/to/magicvoxel-mcp/dist/index.js"],
+      "env": {
+        "MAGICVOXEL_MCP_WORKSPACE": "C:/path/to/voxel-workspace"
+      }
+    }
+  }
+}
+

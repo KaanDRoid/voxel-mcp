@@ -10,9 +10,9 @@ const cases: Record<string,any[]> = {
  generateStructure:['castle','tower','bridge','wall','gate','temple','pyramid','lighthouse'].map(type=>({type})),
  generateCreature:['dog','cat','bird','fish','dragon','horse','snake','spider','robot'].map(type=>({type})),
  generateNature:['rock','crystal','cloud','mountain','island','cave','mushroom','flower'].map(type=>({type})),
- generateAnkaraBlock:[{}], generateVenueInterior:[{}], generateVenueCharacter:[{role:'garson'}],
- generateStaff:['barman','chef','cleaner','konsomatris','musician','security','waiter'].map(type=>({type})),
- generateCustomer:['regular','worker','elite','nostalgic','emotional','young','bureaucrat','undercover','sapkali','gangster','foreign','vip','behzatc'].flatMap(type=>['standing','sitting','drinking'].map(pose=>({type,pose}))),
+ generateCityBlock:[{}], generateVenueInterior:[{}], generateVenueCharacter:[{role:'waiter'}],
+ generateStaff:['bartender','chef','cleaner','hostess','musician','security','waiter'].map(type=>({type})),
+ generateCustomer:['regular','worker','elite','retiree','emotional','young','bureaucrat','undercover','farmer','gangster','foreign','vip','detective'].flatMap(type=>['standing','sitting','drinking'].map(pose=>({type,pose}))),
  generateFromPrompt:['house','cyberpunk character','sphere','tower']
 };
 test('all procedural generators emit deterministic unique integer cells inside 8/16/32/64 models',async()=> {
