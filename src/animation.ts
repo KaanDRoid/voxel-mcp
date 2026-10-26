@@ -3,6 +3,7 @@ import { PNG } from "pngjs";
 import gifenc from "gifenc";
 import { defaultPalette, type VoxModelData } from "./vox.js";
 import { writeFileNoFollow } from "./export.js";
+import { medianCut } from "./color.js";
 
 const { GIFEncoder } = gifenc;
 const FALLBACK_PALETTE = defaultPalette();
@@ -95,32 +96,99 @@ export function exportAnimationSpriteSheet(frames: VoxModelData[], path: string)
   fs.writeFileSync(path, PNG.sync.write(sheet));
 }
 
-export function exportAnimationGIF(input: VoxModelData[] | AnimationData, path: string, projection: Projection = "zmax") {
+export interface GifOptions {
+  /** "none" (default) fails when a frame has too many colors; "median-cut" reduces them. */
+  quantize?: "none" | "median-cut" | undefined;
+  /** Error diffusion used when colors were reduced. */
+  dither?: "none" | "floyd" | undefined;
+  /** Largest number of opaque colors per frame, 2..255 (default 255; index 0 is the transparent slot). */
+  maxColors?: number | undefined;
+}
+
+/** Converts an RGBA frame to GIF palette indices (index 0 = transparent, alpha below 128). */
+export function gifFrameIndices(png: { width: number; height: number; data: Uint8Array | Buffer }, opts: GifOptions = {}) {
+  const limit = opts.maxColors ?? 255;
+  if (!Number.isInteger(limit) || limit < 2 || limit > 255) throw new Error("maxColors must be an integer in 2..255");
+  const n = png.width * png.height;
+  const counts = new Map<number, number>();
+  for (let i = 0; i < n; i++) {
+    if (png.data[i * 4 + 3]! < 128) continue;
+    const key = (png.data[i * 4]! << 16) | (png.data[i * 4 + 1]! << 8) | png.data[i * 4 + 2]!;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const palette: number[][] = [[0, 0, 0]];
+  const indices = new Uint8Array(n);
+  const warnings: string[] = [];
+  const unpack = (k: number) => [(k >> 16) & 255, (k >> 8) & 255, k & 255] as [number, number, number];
+  if (counts.size <= limit) {
+    const lookup = new Map<number, number>();
+    for (const key of counts.keys()) { lookup.set(key, palette.length); palette.push(unpack(key)); }
+    for (let i = 0; i < n; i++) {
+      if (png.data[i * 4 + 3]! < 128) continue;
+      indices[i] = lookup.get((png.data[i * 4]! << 16) | (png.data[i * 4 + 1]! << 8) | png.data[i * 4 + 2]!)!;
+    }
+    return { palette, indices, warnings };
+  }
+  if (opts.quantize !== "median-cut") throw new Error(`GIF frame exceeds ${limit} opaque colors (use quantize "median-cut" to reduce them)`);
+  const reps = medianCut([...counts].map(([key, weight]) => ({ rgb: unpack(key), weight })), limit);
+  for (const c of reps) palette.push(c);
+  const nearest = (r: number, g: number, b: number) => {
+    let best = 1, bestD = Infinity;
+    for (let i = 1; i < palette.length; i++) {
+      const c = palette[i]!;
+      const d = (r - c[0]!) ** 2 + (g - c[1]!) ** 2 + (b - c[2]!) ** 2;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  };
+  const dither = opts.dither === "floyd";
+  const err = dither ? new Float32Array(n * 3) : undefined;
+  const cache = new Map<number, number>();
+  for (let y = 0; y < png.height; y++) for (let x = 0; x < png.width; x++) {
+    const i = y * png.width + x;
+    if (png.data[i * 4 + 3]! < 128) continue;
+    let r = png.data[i * 4]!, g = png.data[i * 4 + 1]!, b = png.data[i * 4 + 2]!, idx: number;
+    if (err) {
+      const rr = Math.max(0, Math.min(255, Math.round(r + err[i * 3]!))), gg = Math.max(0, Math.min(255, Math.round(g + err[i * 3 + 1]!))), bb = Math.max(0, Math.min(255, Math.round(b + err[i * 3 + 2]!)));
+      idx = nearest(rr, gg, bb);
+      const c = palette[idx]!, e = [rr - c[0]!, gg - c[1]!, bb - c[2]!];
+      const spread = (dx: number, dy: number, w: number) => {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || nx >= png.width || ny >= png.height) return;
+        const j = ny * png.width + nx;
+        for (let k = 0; k < 3; k++) err[j * 3 + k]! += e[k]! * w;
+      };
+      spread(1, 0, 7 / 16); spread(-1, 1, 3 / 16); spread(0, 1, 5 / 16); spread(1, 1, 1 / 16);
+    } else {
+      const key = (r << 16) | (g << 8) | b;
+      let hit = cache.get(key);
+      if (hit === undefined) { hit = nearest(r, g, b); cache.set(key, hit); }
+      idx = hit;
+    }
+    indices[i] = idx;
+  }
+  warnings.push(`${counts.size} opaque colors reduced to ${reps.length} with median-cut${dither ? " and Floyd-Steinberg dithering" : ""}`);
+  return { palette, indices, warnings };
+}
+
+export function exportAnimationGIF(input: VoxModelData[] | AnimationData, path: string, projection: Projection = "zmax", opts: GifOptions = {}): { frames: number; warnings: string[] } {
   const animation: AnimationData = Array.isArray(input)
     ? { name: "", fps: 12, loop: true, frames: input.map(model => ({ model, durationMs: 1000 / 12 })) }
     : input;
   checkFrameSizes(animation.frames.map(f => f.model));
   const gif = GIFEncoder();
-  for (const f of animation.frames) {
+  const warnings: string[] = [];
+  animation.frames.forEach((f, frameNo) => {
     if (!Number.isFinite(f.durationMs) || f.durationMs <= 0 || f.durationMs > 655350) throw new Error("GIF duration must be between 1 and 655350 ms");
     const png = renderFrameToPNG(f.model, projection);
     if (png.width > 65535 || png.height > 65535) throw new Error("GIF dimensions exceed 65535");
-    const palette: number[][] = [[0,0,0]];
-    const colors = new Map<string, number>();
-    const indices = new Uint8Array(png.width * png.height);
-    for (let i = 0; i < indices.length; i++) {
-      if (png.data[i*4+3]! < 128) continue; // GIF supports binary alpha only.
-      const rgb = [png.data[i*4]!,png.data[i*4+1]!,png.data[i*4+2]!];
-      const key = rgb.join(",");
-      let index = colors.get(key);
-      if (index === undefined) { index = palette.length; colors.set(key,index); palette.push(rgb); }
-      if (index > 255) throw new Error("GIF frame exceeds 255 opaque colors");
-      indices[i] = index;
-    }
-    gif.writeFrame(indices,png.width,png.height,{palette,delay:Math.max(10,Math.round(f.durationMs/10)*10),repeat:animation.loop?0:-1,transparent:true,transparentIndex:0,dispose:2});
-  }
+    const { palette, indices, warnings: w } = gifFrameIndices(png, opts);
+    for (const message of w) warnings.push(`Frame ${frameNo}: ${message}`);
+    gif.writeFrame(indices, png.width, png.height, { palette, delay: Math.max(10, Math.round(f.durationMs / 10) * 10), repeat: animation.loop ? 0 : -1, transparent: true, transparentIndex: 0, dispose: 2 });
+  });
   gif.finish();
-  fs.writeFileSync(path,gif.bytes());
+  fs.writeFileSync(path, gif.bytes());
+  return { frames: animation.frames.length, warnings };
 }
 function checkFrameSizes(frames: VoxModelData[]) {
   if (!frames.length) throw new Error("no frames");

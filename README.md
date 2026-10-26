@@ -6,19 +6,16 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 
 - **Models and editing**: primitives (box, sphere, cylinder, cone, pyramid, torus, line), explicit voxels, copy/paste, transforms, boolean operations, morphology (erode, dilate, smooth, hollow, outline), patterns, gradients, noise and symmetry tools.
 - **Undo/redo**: `undo` and `redo` cover model edits. A failed edit rolls back automatically. File writes, scenes and animations are not part of undo.
-<<<<<<< HEAD
-- **VOX files**: strict reader and writer for version 150/200 files with the official default palette. `load_vox` rejects multi-model files instead of silently dropping data.
-- **Scenes**: `create_scene`, `load_scene`, `save_scene`, `get_scene_info`, `list_scenes`, `delete_scene`, `extract_scene_model`, `replace_scene_model`, `set_scene_node`, `set_scene_layer`, `set_scene_material`. Transform, group, shape, layer and material records are preserved and unknown chunks are written back unchanged. Scenes require one shared palette, and transforms are stored rather than baked into voxel coordinates.
-- **MagicaVoxel installation (read-only)**: `get_magicavoxel_info`, `list_magicavoxel_samples`, `list_magicavoxel_palettes`, `list_magicavoxel_shaders`, `list_magicavoxel_ibl` and `load_magicavoxel_sample` discover the sample models, palettes, xs shaders, environment maps and `config.txt` of a MagicaVoxel folder. The folder is never written to, and nothing is started.
-=======
 - **VOX files**: strict reader and writer for version 150/200 files with the official default palette. `load_vox` rejects multi-model files instead of silently dropping data: pass `modelIndex` to load one model, or use `load_vox_models` to load every model of a multi-model or animated file (plus a scene that keeps the transforms). Both tools and `load_scene` accept `lenient: true` to recover from duplicate voxels, invalid UTF-8 and malformed render chunks; recovered problems are returned as `warnings`.
 - **Scenes**: `create_scene`, `load_scene`, `load_vox_models`, `save_scene`, `flatten_scene`, `get_scene_info`, `list_scenes`, `delete_scene`, `extract_scene_model`, `replace_scene_model`, `set_scene_node`, `set_scene_layer`, `set_scene_material`. Transform, group, shape, layer and material records are preserved and unknown chunks are written back unchanged. Render settings (`rOBJ`, `rCAM`, `NOTE`, `IMAP`, `META`) are parsed into typed fields and written back byte-for-byte when unchanged. Scenes require one shared palette (a model without a palette is read with the default palette; `replace_scene_model` reports the first differing index and accepts `remap: "nearest"`). Transforms are stored rather than baked unless you ask: `flatten_scene` merges all visible objects into one world-space model (hidden layers skipped by default, `splitIntoChunks` for results above 256 per axis) and `extract_scene_model` accepts `bake`. Only the 24 right-angle orientations exist in the format. The pivot rule used for baking (offset from cell `floor(size / 2)`) is unverified against the application. Parsed scenes stay in memory, so repeated calls do not re-decode the file.
->>>>>>> origin/feat/vox-fidelity
+
+- **MagicaVoxel installation (read-only)**: `get_magicavoxel_info`, `list_magicavoxel_samples`, `list_magicavoxel_palettes`, `list_magicavoxel_shaders`, `list_magicavoxel_ibl` and `load_magicavoxel_sample` discover the sample models, palettes, xs shaders, environment maps and `config.txt` of a MagicaVoxel folder. The folder is never written to, and nothing is started.
 - **Preview**: `render_model` returns a palette-colored PNG (`top`, `front`, `side`, `zmax`, `isometric`) directly to the client.
 - **Generators**: houses, characters, vehicles, furniture, weapons, structures, creatures, nature, terrain, trees, and city/venue helpers. Output is deterministic for a given seed.
 - **Images**: colorized voxelization, silhouettes, depth maps, edge detection and multi-view carving from PNG/JPEG.
 - **Animation**: frame registry, deterministic dissolve between frames, sprite sheets, PNG frame folders, and GIF with per-frame timing and loop setting.
-- **Export/import**: VOX, OBJ, PLY, STL, glTF 2.0 (embedded), PNG slices, legacy Minecraft `.schematic` (gzip NBT, wool-color approximation); OBJ and basic SVG import.
+- **Palettes**: load and save MagicaVoxel palette PNGs (`import_palette_png`, `export_palette_png`), Adobe `.act` and palette-only VOX files; `remap_model_to_palette`, `quantize_model`, `sort_palette`, `find_nearest_color` and `merge_palettes` work in CIE Lab and report the color error.
+- **Export/import**: VOX, OBJ (basic or MagicaVoxel profile with `.mtl` and palette texture), PLY, STL, glTF 2.0 (embedded), PNG slices, Qubicle `.qb`, XRAW, Slab6 VOX, Sponge `.schem` (v2/v3) and legacy Minecraft `.schematic`; OBJ import with solid fill and colors, SVG import with paths, fills and transforms.
 
 ## Requirements
 
@@ -73,6 +70,13 @@ Models are at most 256 voxels per axis (the VOX limit) and 2,000,000 voxels each
 - Scene model IDs are zero-based positions in the scene's model list.
 - Scene material ids are 1..256, as found in files written by the application. How id 256 maps to a palette slot is unverified.
 
+## Format notes
+
+- Mesh exports (`export_obj`, `export_ply`, `export_stl`, `export_gltf`) take `scale` (output units per voxel) and `axis`. An axis is three signed letters: `XYZ` keeps Z up (STL default), `XZ-Y` is Y up (OBJ and glTF default; a rotation, so faces keep their winding). `export_obj` with `profile: "magica"` uses the `io_obj` defaults of MagicaVoxel (`scale` 0.1, merged faces) and writes `<name>.mtl` and `<name>.png` beside the OBJ.
+- Palette PNG, ACT and palette-VOX files store slot k for voxel index k+1 and slot 255 for index 0, like MagicaVoxel's own `palette/pal*.png`. The older `load_palette_from_png` / `save_palette_to_png` tools map pixel k to index k instead; prefer the `*_palette_png` tools for MagicaVoxel palettes.
+- `import_obj` reads `.mtl` files and PNG textures from inside the workspace only. Closed meshes are filled with the voxels whose centers are inside; faces exactly on voxel boundaries are handled by that fill. Open meshes keep only their surface and report a warning.
+- Qubicle, XRAW, Slab6 and `.schem` layouts follow public format descriptions and are covered by byte-level tests; the axis mapping to the original applications is unverified. Slab6 VOX is the Slab6/SLABSPRI grid format, not the MagicaVoxel container.
+
 ## Example
 
 ```text
@@ -93,8 +97,10 @@ npm run check       # typecheck, tests and npm audit
 
 ## Known limitations
 
-- OBJ import samples surfaces (no solid fill); SVG import supports unstyled `<rect>` and `<circle>` only.
-- GIF frames are limited to 255 opaque colors with on/off transparency.
+- OBJ import fills closed meshes only; thin features narrower than a voxel can vanish in solid mode (use `fill: "surface"`).
+- SVG import is fill-only: strokes, text, gradients, CSS classes, clipping, opacity, `use` and elliptical arcs raise an "unsupported SVG" error.
+- GIF frames are limited to 255 opaque colors with on/off transparency; use `quantize: "median-cut"` (and optionally `dither: "floyd"`) to reduce colors instead of failing.
+- OBJ, PLY, MC-style and other MagicaVoxel exports have not been compared against the application's own output (parity unverified).
 - MagicaVoxel is launched with a file but is not remotely controlled.
 
 ## License

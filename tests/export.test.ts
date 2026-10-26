@@ -9,7 +9,7 @@ import { exportOBJ, exportPLY, exportSlices } from '../src/export.js';
 import { exportSTL, exportGLTF, exportMinecraftSchematic } from '../src/export_extra.js';
 import { simplifyModel } from '../src/smart.js';
 import type { VoxModelData } from '../src/vox.js';
-const palette=new Uint32Array(256);palette[1]=0xffff0000;palette[2]=0xff00ff00;
+const palette=new Uint32Array(256);palette[1]=0xff0000ff;palette[2]=0xff00ff00;
 const model:VoxModelData={sizeX:2,sizeY:1,sizeZ:1,palette,voxels:[{x:0,y:0,z:0,i:1},{x:1,y:0,z:0,i:2}]};
 function withDir(fn:(dir:string)=>void){const dir=fs.mkdtempSync(path.join(process.env.TMPDIR??os.tmpdir(),'voxel-export-'));try{fn(dir);}finally{fs.rmSync(dir,{recursive:true,force:true});}}
 function cross(a:number[],b:number[],c:number[]){const u=b.map((v,i)=>v-a[i]!),v=c.map((n,i)=>n-a[i]!);return [u[1]!*v[2]!-u[2]!*v[1]!,u[2]!*v[0]!-u[0]!*v[2]!,u[0]!*v[1]!-u[1]!*v[0]!];}
@@ -51,13 +51,13 @@ test('slices run in ESM and decode palette RGBA, PLY uses default palette not in
  assert.notEqual(line,'0 0 0 1 1 1');
 }));
 
-test('OBJ and STL retain exposed faces with outward Y-up winding, OBJ colors stay self-contained',()=>withDir(dir=>{
+test('OBJ and STL retain exposed faces with outward winding (OBJ Y-up, STL Z-up), OBJ colors stay self-contained',()=>withDir(dir=>{
  const file=path.join(dir,'test.obj');exportOBJ(model,file);const lines=fs.readFileSync(file,'utf8').split('\n');
  const vertices=lines.filter(l=>l.startsWith('v ')).map(l=>l.split(/\s+/).slice(1).map(Number));
  assert.ok(vertices.every(v=>v.length===6));assert.ok(vertices.some(v=>v[3]===1&&v[4]===0));assert.ok(vertices.some(v=>v[3]===0&&v[4]===1));
  assert.ok(!lines.some(l=>l.startsWith('mtllib')));
  const faces=lines.filter(l=>l.startsWith('f ')).map(l=>l.split(/\s+/).slice(1).map(i=>vertices[Number(i)-1]!));assert.equal(faces.length,10);
- for(const f of faces){const normal=cross(f[0]!,f[1]!,f[2]!),center=[0,1,2].map(j=>f.reduce((s,v)=>s+v[j]!,0)/4-[1,.5,.5][j]!);assert.ok(normal.reduce((s,v,j)=>s+v*center[j]!,0)>0);}
+ for(const f of faces){const normal=cross(f[0]!,f[1]!,f[2]!),center=[0,1,2].map(j=>f.reduce((s,v)=>s+v[j]!,0)/4-[1,.5,-.5][j]!);assert.ok(normal.reduce((s,v,j)=>s+v*center[j]!,0)>0);}
  const stl=path.join(dir,'test.stl');exportSTL(model,stl);const text=fs.readFileSync(stl,'utf8');
  const facets=[...text.matchAll(/facet normal ([^\n]+)\n\s+outer loop\n\s+vertex ([^\n]+)\n\s+vertex ([^\n]+)\n\s+vertex ([^\n]+)/g)];assert.equal(facets.length,20);
  for(const f of facets){const nums=(s:string)=>s.trim().split(/\s+/).map(Number),n=nums(f[1]!),a=nums(f[2]!),b=nums(f[3]!),c=nums(f[4]!);const geometric=cross(a,b,c);assert.deepEqual(geometric.map(v=>v||0),n);}

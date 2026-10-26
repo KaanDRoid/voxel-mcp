@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { FORMAT_CREATING_TOOLS, formatToolArgs, writeFormatFixtures } from './helpers/formatCatalog.js';
 
 type Schema = { type?: string; enum?: unknown[]; const?: unknown; default?: unknown; minimum?: number; exclusiveMinimum?: number; minItems?: number; maxItems?: number; items?: Schema; prefixItems?: Schema[]; properties?: Record<string, Schema>; required?: string[]; anyOf?: Schema[] };
 function example(schema: Schema): unknown {
@@ -31,6 +32,7 @@ test('every non-scene modeling tool is exercised over stdio with real fixtures',
   fs.writeFileSync(path.join(root, 'image.png'), PNG.sync.write(png));
   fs.writeFileSync(path.join(root, 'mesh.obj'), 'v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n');
   fs.writeFileSync(path.join(root, 'shape.svg'), '<svg width="16" height="16"><rect x="2" y="2" width="8" height="8" fill="#ff0000"/></svg>');
+  writeFormatFixtures(root);
   const transport = new StdioClientTransport({ command: process.execPath, args: [entry], cwd: root, stderr: 'pipe' });
   const client = new Client({ name: 'catalog-test', version: '1.0.0' });
   const tested = new Set<string>();
@@ -68,6 +70,7 @@ test('every non-scene modeling tool is exercised over stdio with real fixtures',
         if ('path' in args) args.path = `out/${tool.name}.${tool.name.includes('gltf') ? 'gltf' : tool.name.includes('gif') ? 'gif' : tool.name.includes('png') || tool.name.includes('spritesheet') ? 'png' : tool.name.includes('minecraft') ? 'json' : tool.name.split('_').at(-1)}`;
         if ('folder' in args) args.folder = `out/${tool.name}`;
       } else if ('path' in args) args.path = ['load_vox', 'load_vox_models', 'open_in_magicavoxel'].includes(tool.name) ? 'input.vox' : tool.name === 'import_obj' ? 'mesh.obj' : tool.name === 'import_svg' ? 'shape.svg' : 'image.png';
+      Object.assign(args, formatToolArgs(tool.name, { id, other }));
       for (const key of ['frontPath', 'sidePath', 'topPath']) if (key in (tool.inputSchema.properties ?? {}) && tool.name === 'multi_view_to_voxel') args[key] = 'image.png';
       if (tool.name === 'open_in_magicavoxel') {
         const result = await client.callTool({ name: tool.name, arguments: args });
@@ -80,6 +83,7 @@ test('every non-scene modeling tool is exercised over stdio with real fixtures',
           const createdId = parse(result).id;
           if (createdId && createdId !== id && createdId !== other) await call('delete_model', { id: createdId });
         }
+        if (FORMAT_CREATING_TOOLS.has(tool.name)) await call('delete_model', { id: parse(result).id });
         if (tool.name === 'delete_model') {
           // Deletion itself was verified; stop reusing this fixture by restoring it through undo.
           await call('undo');

@@ -144,13 +144,8 @@ export function registerSceneTools(register: RegisterTool, registry: ModelRegist
     else scene.layers.push({ id: layerId, attributes });
     commit(scene, sceneId); return text({ sceneId, layerId });
   });
-<<<<<<< HEAD
   register({ name: "set_scene_material", description: "Create or update a palette material dictionary, such as _type, _rough and _metal. Files written by the application carry material ids 1..256; the exact mapping of id 256 to a palette slot is unverified", inputSchema: z.object({ sceneId: z.string(), index: z.number().int().min(1).max(256), properties: dictionary }).strict() }, async ({ sceneId, index, properties }) => {
-    const scene = get(sceneId), material = scene.materials.find(m => m.id === index);
-=======
-  register({ name: "set_scene_material", description: "Create or update a palette material dictionary, such as _type, _rough and _metal", inputSchema: z.object({ sceneId: z.string(), index: z.number().int().min(1).max(255), properties: dictionary }).strict() }, async ({ sceneId, index, properties }) => {
     const scene = get(sceneId), material = indexScene(scene).materials.get(index);
->>>>>>> origin/feat/vox-fidelity
     if (material) material.attributes = { ...material.attributes, ...properties };
     else scene.materials.push({ id: index, attributes: properties });
     commit(scene, sceneId); return text({ sceneId, index });

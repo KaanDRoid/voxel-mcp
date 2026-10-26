@@ -9,10 +9,9 @@ import { imageToVoxelColorized, silhouetteTo3D, edgeDetectToVoxel, depthMapToVox
 import { deduplicateVoxels, mirror, hollow, floodFill, applyNoise, generateTerrain, generateTree, replaceColor, applyPattern, applyGradient, randomizeSurfaceColor, erode, dilate, outline, smoothModel, extrudeFace, bevelEdges, addDetailNoise } from "./ops.js";
 import { setPaletteIndex, loadPaletteFromPng, savePaletteToPng, generatePalette, extractPaletteFromImage, applyPaletteToModel, blendPalettes } from "./palette.js";
 import { measureDistance, getSurfaceArea, getVolume, findCenter, getDimensions, countColors } from "./analysis.js";
-import { exportOBJ, exportPLY, exportSlices } from "./export.js";
-import { exportSTL, exportGLTF, exportMinecraftSchematic } from "./export_extra.js";
-import { importOBJ, importSVG } from "./importers.js";
-import { AnimationRegistry, exportAnimationSpriteSheet, exportAnimationGIF, interpolateFrames, exportAnimationFrames, renderFrameToPNG } from "./animation.js";
+import { exportSlices } from "./export.js";
+import { exportMinecraftSchematic } from "./export_extra.js";
+import { AnimationRegistry, exportAnimationSpriteSheet, interpolateFrames, exportAnimationFrames, renderFrameToPNG } from "./animation.js";
 import { autoUvColor, detectSymmetry, makeSymmetric, simplifyModel, voxelizeText } from "./smart.js";
 import path from "path";
 import fs from "fs";
@@ -21,6 +20,8 @@ import { FilePolicy } from "./files.js";
 import { registerSceneTools } from "./sceneTools.js";
 import { INSTALL_READ_ONLY_TOOLS, registerInstallTools } from "./installTools.js";
 import { openVoxFile } from "./openApp.js";
+import { FORMAT_READ_ONLY, registerFormatTools } from "./formatTools.js";
+
 
 // Clipboard for copy/paste operations
 
@@ -30,6 +31,8 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   const files = new FilePolicy();
   let pending: Promise<unknown> = Promise.resolve();
   const readOnly = new Set(["list_models", "get_model_info", "measure_distance", "get_surface_area", "get_volume", "find_center", "get_dimensions", "count_colors", "detect_symmetry", "render_model", "copy_region", "list_scenes", "get_scene_info", ...INSTALL_READ_ONLY_TOOLS]);
+  for (const name of FORMAT_READ_ONLY) readOnly.add(name);
+
   function registerTool<T extends z.ZodRawShape>(definition: { name: string; description: string; inputSchema: z.ZodObject<T> }, handler: (args: z.infer<z.ZodObject<T>>) => Promise<CallToolResult>) {
     const { name, ...schema } = definition;
     server.registerTool(name, { ...schema, annotations: { readOnlyHint: readOnly.has(name), destructiveHint: !readOnly.has(name), openWorldHint: name === "open_in_magicavoxel" } }, async args => {
@@ -1062,35 +1065,6 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   );
 
   // Export tools
-  registerTool(
-    {
-      name: "export_obj",
-      description: "Export model to OBJ mesh format",
-      inputSchema: z.object({ id: z.string(), path: z.string() }).strict(),
-    },
-    async (args) => {
-      const m = registry.get(args.id);
-      const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path);
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
-      exportOBJ(m, abs);
-      return { content: [{ type: "text", text: `exported OBJ to ${abs}` }] };
-    }
-  );
-
-  registerTool(
-    {
-      name: "export_ply",
-      description: "Export model to PLY point cloud format",
-      inputSchema: z.object({ id: z.string(), path: z.string() }).strict(),
-    },
-    async (args) => {
-      const m = registry.get(args.id);
-      const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path);
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
-      exportPLY(m, abs);
-      return { content: [{ type: "text", text: `exported PLY to ${abs}` }] };
-    }
-  );
 
   registerTool(
     {
@@ -1162,30 +1136,15 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
 
   // Export extensions
   registerTool(
-    { name: "export_stl", description: "Export model as ASCII STL", inputSchema: z.object({ id: z.string(), path: z.string() }).strict() },
-    async (args) => { const m = registry.get(args.id); const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path); exportSTL(m, abs); return { content: [{ type: "text", text: `exported STL to ${abs}` }] }; }
-  );
-  registerTool(
-    { name: "export_gltf", description: "Export model as minimal glTF 2.0", inputSchema: z.object({ id: z.string(), path: z.string() }).strict() },
-    async (args) => { const m = registry.get(args.id); const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path); exportGLTF(m, abs); return { content: [{ type: "text", text: `exported glTF to ${abs}` }] }; }
-  );
-  registerTool(
-    { name: "export_minecraft_schematic", description: "Export model as simple JSON schematic", inputSchema: z.object({ id: z.string(), path: z.string() }).strict() },
+    { name: "export_minecraft_schematic", description: "Export model as a legacy Alpha .schematic (gzip NBT, wool blocks); see export_minecraft_schem for Sponge .schem", inputSchema: z.object({ id: z.string(), path: z.string() }).strict() },
     async (args) => { const m = registry.get(args.id); const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path); exportMinecraftSchematic(m, abs); return { content: [{ type: "text", text: `exported schematic JSON to ${abs}` }] }; }
   );
 
   // Importers
-  registerTool(
-    { name: "import_obj", description: "Import OBJ mesh and voxelize into a model", inputSchema: z.object({ path: z.string(), sizeX: z.number().int().positive(), sizeY: z.number().int().positive(), sizeZ: z.number().int().positive() }).strict() },
-    async (args) => { const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path); const { id, model } = registry.create(args.sizeX, args.sizeY, args.sizeZ); await importOBJ(model, abs); return { content: [{ type: "text", text: JSON.stringify({ id }) }] }; }
-  );
-  registerTool(
-    { name: "import_svg", description: "Import basic SVG shapes (rect/circle) and extrude", inputSchema: z.object({ path: z.string(), sizeX: z.number().int().positive(), sizeY: z.number().int().positive(), sizeZ: z.number().int().positive(), thickness: z.number().int().positive().optional() }).strict() },
-    async (args) => { const abs = path.isAbsolute(args.path) ? args.path : path.join(process.cwd(), args.path); const { id, model } = registry.create(args.sizeX, args.sizeY, args.sizeZ); importSVG(model, abs, { thickness: args.thickness ?? 1 }); return { content: [{ type: "text", text: JSON.stringify({ id }) }] }; }
-  );
 
   // Animation
   const anims = new AnimationRegistry();
+  registerFormatTools(registerTool, registry, files, anims);
   registerTool(
     { name: "create_animation", description: "Create a new empty animation", inputSchema: z.object({}).strict() },
     async () => ({ content: [{ type: "text", text: JSON.stringify({ id: anims.create() }) }] })
@@ -1229,10 +1188,6 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   registerTool(
     { name: "export_animation_frames", description: "Export animation frames as separate PNGs", inputSchema: z.object({ animationId: z.string(), folder: z.string(), projection: z.enum(["top","front","side","zmax","isometric"]).optional() }).strict() },
     async (args) => { const frames = anims.getFrames(args.animationId); const abs = path.isAbsolute(args.folder) ? args.folder : path.join(process.cwd(), args.folder); exportAnimationFrames(frames, abs, args.projection ?? "zmax"); return { content: [{ type: "text", text: `exported frames to ${abs}` }] }; }
-  );
-  registerTool(
-    { name: "export_animation_gif", description: "Export an animation as a looping or one-shot GIF using frame durations and palette colors", inputSchema: z.object({ animationId: z.string(), path: z.string(), projection: z.enum(["top","front","side","zmax","isometric"]).optional() }).strict() },
-    async (args) => { const data = anims.getData(args.animationId); exportAnimationGIF(data, args.path, args.projection ?? "isometric"); return { content: [{ type: "text", text: `exported GIF to ${args.path}` }] }; }
   );
 
   // Smart tools
