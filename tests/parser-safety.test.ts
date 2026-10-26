@@ -40,6 +40,42 @@ test('bounded decoding still accepts a valid interlaced PNG', () => {
   assert.deepEqual([...decoded.data], [255, 80, 20, 255]);
 });
 
+function indexedPng(palettes: Buffer[]): Buffer {
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(1); ihdr.writeUInt32BE(1, 4); ihdr[8] = 8; ihdr[9] = 3;
+  return Buffer.concat([
+    Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', ihdr),
+    ...palettes.map(data => chunk('PLTE', data)),
+    chunk('IDAT', deflateSync(Buffer.from([0, 0]))), chunk('IEND', Buffer.alloc(0))
+  ]);
+}
+
+test('bounded decoding accepts an indexed PNG with a full 256-entry palette', () => {
+  const palette = Buffer.alloc(768);
+  palette.set([10, 20, 30]);
+  const decoded = readPngBounded(indexedPng([palette]));
+  assert.deepEqual([...decoded.data], [10, 20, 30, 255]);
+});
+
+test('PNG palette chunks over 256 entries are rejected before decoding', t => {
+  const file = indexedPng([Buffer.alloc(3000)]);
+  assert.ok(file.length < 4096);
+  t.mock.method(PNG.sync, 'read', () => { throw new Error('decoder reached'); });
+  assert.throws(() => readPngBounded(file), /PNG palette/i);
+});
+
+test('duplicate PNG palette chunks are rejected even when each is small', t => {
+  const file = indexedPng([Buffer.alloc(300), Buffer.alloc(300)]);
+  t.mock.method(PNG.sync, 'read', () => { throw new Error('decoder reached'); });
+  assert.throws(() => readPngBounded(file), /PNG palette/i);
+});
+
+test('empty and non-triplet PNG palette chunks are rejected', t => {
+  t.mock.method(PNG.sync, 'read', () => { throw new Error('decoder reached'); });
+  for (const size of [0, 1, 2, 4, 767]) {
+    assert.throws(() => readPngBounded(indexedPng([Buffer.alloc(size)])), /PNG palette/i, `size ${size}`);
+  }
+});
+
 function emptyCompoundList(count: number): Buffer {
   const header = Buffer.from([10, 0, 0, 9, 0, 1, 120, 10, 0, 0, 0, 0]);
   header.writeInt32BE(count, 8);

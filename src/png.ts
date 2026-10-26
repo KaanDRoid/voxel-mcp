@@ -20,13 +20,17 @@ export function readPngBounded(bytes: Buffer, limits: PngLimits = {}): ReturnTyp
   const scanlines = (w: number, h: number) => w > 0 && h > 0 ? (Math.ceil(w * channels * depth / 8) + 1) * h : 0;
   const expected = interlace === 0 ? scanlines(width, height) : ADAM7.reduce((sum, [x, y, dx, dy]) => sum + scanlines(Math.max(0, Math.ceil((width - x) / dx)), Math.max(0, Math.ceil((height - y) / dy))), 0);
   const compressed: Buffer[] = [];
-  let offset = 8, chunks = 0, ended = false;
+  let offset = 8, chunks = 0, palettes = 0, ended = false;
   while (offset < bytes.length) {
     if (++chunks > 4096 || offset + 12 > bytes.length) throw new Error("PNG chunk count or size limit exceeded");
     const length = bytes.readUInt32BE(offset), next = offset + length + 12;
     if (next > bytes.length) throw new Error("Truncated PNG chunk");
     const type = bytes.toString("ascii", offset + 4, offset + 8);
     if (type === "IHDR" && offset !== 8) throw new Error("Duplicate PNG header");
+    if (type === "PLTE") {
+      if (palettes++) throw new Error("Duplicate PNG palette");
+      if (!length || length > 768 || length % 3) throw new Error("Invalid PNG palette size (expected 1..256 RGB entries)");
+    }
     if (type === "IDAT") compressed.push(bytes.subarray(offset + 8, offset + 8 + length));
     offset = next;
     if (type === "IEND") { if (length !== 0 || offset !== bytes.length) throw new Error("Invalid PNG end chunk"); ended = true; break; }
