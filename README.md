@@ -8,6 +8,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 - **Undo/redo**: `undo` and `redo` cover model edits. A failed edit rolls back automatically. File writes, scenes and animations are not part of undo.
 - **VOX files**: strict reader and writer for version 150/200 files with the official default palette. `load_vox` rejects multi-model files instead of silently dropping data.
 - **Scenes**: `create_scene`, `load_scene`, `save_scene`, `get_scene_info`, `list_scenes`, `delete_scene`, `extract_scene_model`, `replace_scene_model`, `set_scene_node`, `set_scene_layer`, `set_scene_material`. Transform, group, shape, layer and material records are preserved and unknown chunks are written back unchanged. Scenes require one shared palette, and transforms are stored rather than baked into voxel coordinates.
+- **MagicaVoxel installation (read-only)**: `get_magicavoxel_info`, `list_magicavoxel_samples`, `list_magicavoxel_palettes`, `list_magicavoxel_shaders`, `list_magicavoxel_ibl` and `load_magicavoxel_sample` discover the sample models, palettes, xs shaders, environment maps and `config.txt` of a MagicaVoxel folder. The folder is never written to, and nothing is started.
 - **Preview**: `render_model` returns a palette-colored PNG (`top`, `front`, `side`, `zmax`, `isometric`) directly to the client.
 - **Generators**: houses, characters, vehicles, furniture, weapons, structures, creatures, nature, terrain, trees, and city/venue helpers. Output is deterministic for a given seed.
 - **Images**: colorized voxelization, silhouettes, depth maps, edge detection and multi-view carving from PNG/JPEG.
@@ -17,7 +18,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 ## Requirements
 
 - Node.js 22 or newer
-- MagicaVoxel is optional and only needed for `open_in_magicavoxel`
+- MagicaVoxel is optional: it is needed for `open_in_magicavoxel` and for the installation discovery tools
 
 ## Install
 
@@ -45,7 +46,16 @@ Point your MCP client at `dist/index.js` (see [client-config](client-config/READ
 | Variable | Purpose |
 |---|---|
 | `MAGICVOXEL_MCP_WORKSPACE` | Directory for all reads and writes. Defaults to the server's working directory. Paths that escape it, including through symlinks, are rejected. |
-| `MAGICAVOXEL_PATH` | Absolute path to `MagicaVoxel.exe` or `MagicaVoxel`, enabling `open_in_magicavoxel`. |
+| `MAGICAVOXEL_PATH` | Absolute path to `MagicaVoxel.exe` or `MagicaVoxel`, enabling `open_in_magicavoxel` and installation discovery. Takes precedence over `MAGICAVOXEL_HOME`. |
+| `MAGICAVOXEL_HOME` | The MagicaVoxel installation folder (the one containing the executable, `config`, `vox`, `palette`, `shader` and `ibl`). Enables the discovery tools and, when `MAGICAVOXEL_PATH` is unset, `open_in_magicavoxel`. |
+
+When an installation is configured, its `vox`, `palette`, `shader` and `ibl` folders and its `config` text files become readable by absolute path (only `.vox`, `.png`, `.txt` and `.hdr` files respectively). Executables, the `cache` folder and everything else in the installation stay unreadable, and nothing in it can be written; all writes remain confined to the workspace.
+
+`open_in_magicavoxel` only opens `.vox` files and starts the application with the installation folder as its working directory.
+
+### Resources
+
+`magicavoxel://install`, `magicavoxel://samples`, `magicavoxel://palettes` and `magicavoxel://shaders` describe the installation. `magicavoxel:samples` and `magicavoxel:palettes` are deprecated aliases that return plain file-name lists from the installation (previously they looked in the workspace). `magicavoxel:models` and `magicavoxel:vox/{folder}` are unchanged.
 
 ## Limits
 
@@ -56,6 +66,7 @@ Models are at most 256 voxels per axis (the VOX limit) and 2,000,000 voxels each
 - X = right, Y = forward, Z = up. Color indexes are 1-255; index 0 is empty.
 - Palettes are 256 `uint32` values in little-endian RGBA byte order (`0xAABBGGRR`).
 - Scene model IDs are zero-based positions in the scene's model list.
+- Scene material ids are 1..256, as found in files written by the application. How id 256 maps to a palette slot is unverified.
 
 ## Example
 
