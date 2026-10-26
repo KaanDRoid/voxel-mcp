@@ -19,3 +19,6 @@ ROADMAP.md
 # Logs
 *.log
 npm-debug.log*
+
+# Local data
+*.tsbuildinfo

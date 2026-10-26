@@ -1,14 +1,19 @@
 import fs from "fs";
 import { PNG } from "pngjs";
-import type { VoxModelData } from "./vox.js";
+import gifenc from "gifenc";
+import { defaultPalette, type VoxModelData } from "./vox.js";
+import { writeFileNoFollow } from "./export.js";
+
+const { GIFEncoder } = gifenc;
+const FALLBACK_PALETTE = defaultPalette();
 
 export type AnimationId = string;
 
 export class AnimationRegistry {
   private next = 1;
   private anims = new Map<AnimationId, AnimationData>();
-  create(name?: string): AnimationId { const id = String(this.next++); this.anims.set(id, { name: name ?? `anim_${id}` , fps: 12, loop: true, frames: [] }); return id; }
-  addFrame(id: AnimationId, model: VoxModelData, durationMs?: number) { const a = this.data(id); a.frames.push({ model: structuredCloneModel(model), durationMs: durationMs ?? Math.round(1000 / a.fps) }); }
+  create(name?: string): AnimationId { if (this.anims.size >= 16) throw new Error("Animation limit exceeded (16)"); const id = String(this.next++); this.anims.set(id, { name: name ?? `anim_${id}` , fps: 12, loop: true, frames: [] }); return id; }
+  addFrame(id: AnimationId, model: VoxModelData, durationMs?: number) { const a = this.data(id); this.checkCapacity(model.voxels.length); a.frames.push({ model: structuredCloneModel(model), durationMs: durationMs ?? Math.round(1000 / a.fps) }); }
   replaceFrame(id: AnimationId, index: number, model: VoxModelData) { const a = this.data(id); a.frames[index] = { ...a.frames[index]!, model: structuredCloneModel(model) }; }
   removeFrame(id: AnimationId, index: number) { const a = this.data(id); a.frames.splice(index, 1); }
   clearFrames(id: AnimationId) { const a = this.data(id); a.frames = []; }
@@ -16,12 +21,17 @@ export class AnimationRegistry {
   getData(id: AnimationId) { return this.data(id); }
   setFps(id: AnimationId, fps: number) { const a = this.data(id); a.fps = Math.max(1, Math.floor(fps)); for (const f of a.frames) f.durationMs = Math.round(1000 / a.fps); }
   setLoop(id: AnimationId, loop: boolean) { this.data(id).loop = loop; }
-  setFrameDuration(id: AnimationId, index: number, durationMs: number) { const a = this.data(id); a.frames[index]!.durationMs = Math.max(1, Math.floor(durationMs)); }
+  setFrameDuration(id: AnimationId, index: number, durationMs: number) { const a = this.data(id); if (!a.frames[index]) throw new Error("frame index out of range"); a.frames[index]!.durationMs = Math.max(1, Math.floor(durationMs)); }
   totalDuration(id: AnimationId) { const a = this.data(id); return a.frames.reduce((s,f)=>s+(f.durationMs||0),0); }
   reverse(id: AnimationId) { const a = this.data(id); a.frames.reverse(); }
-  duplicateFrame(id: AnimationId, index: number) { const a = this.data(id); const f=a.frames[index]!; a.frames.splice(index+1, 0, { model: structuredCloneModel(f.model), durationMs: f.durationMs }); }
-  reorder(id: AnimationId, from: number, to: number) { const a = this.data(id); const [f] = a.frames.splice(from,1); a.frames.splice(to, 0, f!); }
+  duplicateFrame(id: AnimationId, index: number) { const a = this.data(id); const f=a.frames[index]; if (!f) throw new Error("frame index out of range"); this.checkCapacity(f.model.voxels.length); a.frames.splice(index+1, 0, { model: structuredCloneModel(f.model), durationMs: f.durationMs }); }
+  reorder(id: AnimationId, from: number, to: number) { const a = this.data(id); if (![from, to].every(n => Number.isInteger(n) && n >= 0 && n < a.frames.length)) throw new Error("frame index out of range"); const [f] = a.frames.splice(from,1); a.frames.splice(to, 0, f!); }
   concat(intoId: AnimationId, fromId: AnimationId) { const A=this.data(intoId), B=this.data(fromId); A.frames.push(...B.frames.map(f=>({ model: structuredCloneModel(f.model), durationMs: f.durationMs }))); }
+  private checkCapacity(adding: number) {
+    let frames = 0, voxels = adding;
+    for (const a of this.anims.values()) { frames += a.frames.length; for (const f of a.frames) voxels += f.model.voxels.length; }
+    if (frames >= 512 || voxels > 8_000_000) throw new Error("Animation storage limit exceeded");
+  }
   private data(id: AnimationId): AnimationData { const a = this.anims.get(id); if (!a) throw new Error("animation not found"); return a; }
 }
 
@@ -34,100 +44,157 @@ export interface AnimationData {
 
 function structuredCloneModel(m: VoxModelData): VoxModelData {
   const out: VoxModelData = { sizeX: m.sizeX, sizeY: m.sizeY, sizeZ: m.sizeZ, voxels: m.voxels.map(v => ({ ...v })) };
-  if (m.palette) (out as any).palette = new Uint32Array(m.palette);
+  if (m.palette) out.palette = new Uint32Array(m.palette);
   return out;
 }
 
 export function interpolateFrames(a: VoxModelData, b: VoxModelData, steps: number): VoxModelData[] {
-  // Naive interpolation: union with progressive blend (every other voxel toggled)
-  if (a.sizeX !== b.sizeX || a.sizeY !== b.sizeY || a.sizeZ !== b.sizeZ) throw new Error("frame sizes differ");
-  const out: VoxModelData[] = [];
-  const setA = new Set(a.voxels.map(v => `${v.x},${v.y},${v.z}`));
-  const setB = new Set(b.voxels.map(v => `${v.x},${v.y},${v.z}`));
-  const union = new Set<string>([...setA, ...setB]);
-  for (let s = 1; s <= steps; s++) {
-    const m: VoxModelData = { sizeX: a.sizeX, sizeY: a.sizeY, sizeZ: a.sizeZ, voxels: [] };
-    let i = 0;
-    for (const key of union) {
-      if (i % (steps + 1) <= s) {
-        const parts = key.split(",").map(Number);
-        m.voxels.push({ x: Number(parts[0] ?? 0), y: Number(parts[1] ?? 0), z: Number(parts[2] ?? 0), i: 200 });
+  // Spatial dissolve only: no motion correspondence between arbitrary voxels is assumed.
+  // Return `steps` intermediate frames; callers keep the unchanged endpoints.
+  if (!Number.isInteger(steps) || steps < 0) throw new Error("steps must be a nonnegative integer");
+  checkFrameSizes([a,b]);
+  const key = (v: VoxModelData["voxels"][number]) => `${v.x},${v.y},${v.z}`;
+  const A = new Map(a.voxels.filter(v=>validVoxel(a,v)).map(v=>[key(v),v]));
+  const B = new Map(b.voxels.filter(v=>validVoxel(b,v)).map(v=>[key(v),v]));
+  const keys = [...new Set([...A.keys(),...B.keys()])].sort();
+  const paletteA = a.palette ?? defaultPalette(), paletteB = b.palette ?? defaultPalette();
+  return Array.from({length:steps},(_,s) => {
+    const t = (s+1)/(steps+1);
+    const palette = new Uint32Array(256);
+    const colors = new Map<number,number>();
+    const voxels: VoxModelData["voxels"] = [];
+    for (let ki=0;ki<keys.length;ki++) {
+      const k = keys[ki]!;
+      // Evenly distributed, stable thresholds ensure voxels switch once, never flicker.
+      const useB = t >= (ki+1)/(keys.length+1);
+      const v = (useB ? B : A).get(k);
+      if (!v) continue;
+      const color = (useB ? paletteB : paletteA)[v.i] ?? 0;
+      let index = colors.get(color);
+      if (index === undefined) {
+        index = colors.size+1;
+        if (index > 255) throw new Error("crossfade frame exceeds 255 colors");
+        colors.set(color,index); palette[index]=color;
       }
-      i++;
+      voxels.push({...v,i:index});
     }
-    out.push(m);
-  }
-  return out;
+    return {sizeX:a.sizeX,sizeY:a.sizeY,sizeZ:a.sizeZ,voxels,palette};
+  });
 }
 
 export function exportAnimationSpriteSheet(frames: VoxModelData[], path: string) {
-  if (frames.length === 0) throw new Error("no frames");
-  const sx = frames[0]!.sizeX, sy = frames[0]!.sizeY, sz = frames[0]!.sizeZ;
-  const sheet = new PNG({ width: sx * frames.length, height: sy });
-  const idx2d = (x:number,y:number,w:number) => (y*w + x) * 4;
+  checkFrameSizes(frames);
+  const first = renderFrameToPNG(frames[0]!);
+  const sheet = new PNG({ width: first.width * frames.length, height: first.height });
   for (let fi = 0; fi < frames.length; fi++) {
-    const f = frames[fi]!;
-    const occ = new Uint8Array(sx * sy * sz);
-    const idx3d = (x: number, y: number, z: number) => x + sx * (y + sy * z);
-    for (const v of f.voxels) occ[idx3d(v.x, v.y, v.z)] = v.i;
-    for (let y = 0; y < sy; y++) {
-      for (let x = 0; x < sx; x++) {
-        // composite max intensity along Z
-        let c = 0; for (let z = 0; z < sz; z++) { const val = occ[idx3d(x,y,z)] ?? 0; c = Math.max(c, Number(val)); }
-        const di = idx2d(x + fi * sx, sy - 1 - y, sheet.width);
-        sheet.data[di+0] = c; sheet.data[di+1] = c; sheet.data[di+2] = c; sheet.data[di+3] = c ? 255 : 0;
-      }
+    const png = renderFrameToPNG(frames[fi]!);
+    for (let y = 0; y < png.height; y++) {
+      png.data.copy(sheet.data,(y*sheet.width+fi*png.width)*4,y*png.width*4,(y+1)*png.width*4);
     }
   }
   fs.writeFileSync(path, PNG.sync.write(sheet));
 }
 
-export function exportAnimationGIF(_frames: VoxModelData[], _path: string) {
-  throw new Error("export_animation_gif is not available in this build; use export_animation_spritesheet instead");
+export function exportAnimationGIF(input: VoxModelData[] | AnimationData, path: string, projection: Projection = "zmax") {
+  const animation: AnimationData = Array.isArray(input)
+    ? { name: "", fps: 12, loop: true, frames: input.map(model => ({ model, durationMs: 1000 / 12 })) }
+    : input;
+  checkFrameSizes(animation.frames.map(f => f.model));
+  const gif = GIFEncoder();
+  for (const f of animation.frames) {
+    if (!Number.isFinite(f.durationMs) || f.durationMs <= 0 || f.durationMs > 655350) throw new Error("GIF duration must be between 1 and 655350 ms");
+    const png = renderFrameToPNG(f.model, projection);
+    if (png.width > 65535 || png.height > 65535) throw new Error("GIF dimensions exceed 65535");
+    const palette: number[][] = [[0,0,0]];
+    const colors = new Map<string, number>();
+    const indices = new Uint8Array(png.width * png.height);
+    for (let i = 0; i < indices.length; i++) {
+      if (png.data[i*4+3]! < 128) continue; // GIF supports binary alpha only.
+      const rgb = [png.data[i*4]!,png.data[i*4+1]!,png.data[i*4+2]!];
+      const key = rgb.join(",");
+      let index = colors.get(key);
+      if (index === undefined) { index = palette.length; colors.set(key,index); palette.push(rgb); }
+      if (index > 255) throw new Error("GIF frame exceeds 255 opaque colors");
+      indices[i] = index;
+    }
+    gif.writeFrame(indices,png.width,png.height,{palette,delay:Math.max(10,Math.round(f.durationMs/10)*10),repeat:animation.loop?0:-1,transparent:true,transparentIndex:0,dispose:2});
+  }
+  gif.finish();
+  fs.writeFileSync(path,gif.bytes());
+}
+function checkFrameSizes(frames: VoxModelData[]) {
+  if (!frames.length) throw new Error("no frames");
+  const first = frames[0]!;
+  if (frames.some(f=>f.sizeX!==first.sizeX || f.sizeY!==first.sizeY || f.sizeZ!==first.sizeZ)) throw new Error("frame sizes differ");
+}
+
+/** Model colors are packed ARGB; index zero denotes empty space. */
+export function voxelColor(frame: VoxModelData, index: number): [number, number, number, number] {
+  const c = (frame.palette ?? FALLBACK_PALETTE)[index] ?? 0;
+  return [(c >>> 16) & 255, (c >>> 8) & 255, c & 255, (c >>> 24) & 255];
+}
+function validVoxel(frame: VoxModelData, v: VoxModelData["voxels"][number]): boolean {
+  return v.i > 0 && [v.x, v.y, v.z].every(Number.isInteger) && v.x >= 0 && v.x < frame.sizeX && v.y >= 0 && v.y < frame.sizeY && v.z >= 0 && v.z < frame.sizeZ;
 }
 
 export type Projection = "top" | "front" | "side" | "zmax" | "isometric";
 
-export function renderFrameToPNG(frame: VoxModelData, projection: Projection = "zmax"): any {
+export function renderFrameToPNG(frame: VoxModelData, projection: Projection = "zmax"): InstanceType<typeof PNG> {
   if (projection === "zmax" || projection === "top" || projection === "front" || projection === "side") {
     const sx = frame.sizeX, sy = frame.sizeY, sz = frame.sizeZ;
-    const png = new PNG({ width: sx, height: sy });
-    const idx = (x:number,y:number) => (y*sx + x)*4;
-    const occ = new Uint8Array(sx*sy*sz);
-    const id3 = (x:number,y:number,z:number)=>x+sx*(y+sy*z);
-    for (const v of frame.voxels) occ[id3(v.x,v.y,v.z)] = v.i;
-    for (let y=0;y<sy;y++) for (let x=0;x<sx;x++) {
-      let c=0;
-      if (projection==="zmax"||projection==="top") { for (let z=0; z<sz; z++) c=Math.max(c, occ[id3(x,y,z)]??0); }
-      else if (projection==="front") { for (let z=0; z<sz; z++) c=Math.max(c, occ[id3(x,z,y)]??0); }
-      else { for (let z=0; z<sz; z++) c=Math.max(c, occ[id3(z,y,x)]??0); }
-      const di = idx(x, sy-1-y); png.data[di]=c; png.data[di+1]=c; png.data[di+2]=c; png.data[di+3]= c?255:0;
+    const width = projection === "side" ? sy : sx;
+    const height = projection === "top" || projection === "zmax" ? sy : sz;
+    const png = new PNG({ width, height });
+    const depths = new Int32Array(width * height).fill(-1);
+    for (const v of frame.voxels) {
+      if (!validVoxel(frame, v)) continue;
+      const x = projection === "side" ? v.y : v.x;
+      const y = height - 1 - (projection === "top" || projection === "zmax" ? v.y : v.z);
+      const depth = projection === "side" ? v.x : projection === "front" ? v.y : v.z;
+      const pi = y * width + x;
+      const rgba = voxelColor(frame, v.i);
+      if (rgba[3] === 0 || depth < depths[pi]!) continue;
+      depths[pi] = depth;
+      png.data.set(rgba, pi * 4);
     }
     return png;
   }
-  // isometric rendering (simple painter's algorithm)
-  const W = frame.sizeX + frame.sizeY + 10;
-  const H = Math.floor((frame.sizeX + frame.sizeY)/2) + frame.sizeZ + 10;
+  // Orthographic isometric cube faces, viewed from positive X/Y/Z.
+  const W = 2 * (frame.sizeX + frame.sizeY) + 1;
+  const H = frame.sizeX + frame.sizeY + 2 * frame.sizeZ + 1;
   const png = new PNG({ width: W, height: H });
-  const put = (x:number,y:number,i:number)=>{
-    if (x<0||y<0||x>=W||y>=H) return; const di=(y*W+x)*4; png.data[di]=i; png.data[di+1]=i; png.data[di+2]=i; png.data[di+3]=255;
+  const project = (x: number, y: number, z: number): [number, number] => [2 * (x - y + frame.sizeY), x + y + 2 * (frame.sizeZ - z)];
+  const triangle = (a: number[], b: number[], c: number[], color: number[]) => {
+    const cross = (p: number[], q: number[], x: number, y: number) => (q[0]! - p[0]!) * (y - p[1]!) - (q[1]! - p[1]!) * (x - p[0]!);
+    for (let y = Math.max(0, Math.min(a[1]!, b[1]!, c[1]!)); y < Math.min(H, Math.max(a[1]!, b[1]!, c[1]!)); y++) {
+      for (let x = Math.max(0, Math.min(a[0]!, b[0]!, c[0]!)); x < Math.min(W, Math.max(a[0]!, b[0]!, c[0]!)); x++) {
+        const signs = [cross(a,b,x+.5,y+.5), cross(b,c,x+.5,y+.5), cross(c,a,x+.5,y+.5)];
+        if (signs.every(s => s >= 0) || signs.every(s => s <= 0)) png.data.set(color, (y * W + x) * 4);
+      }
+    }
   };
-  const sort = frame.voxels.slice().sort((a,b)=> (a.x+a.y+a.z) - (b.x+b.y+b.z));
-  const ox = Math.floor(W/2), oy = 5;
-  for (const v of sort) {
-    const px = ox + (v.x - v.y);
-    const py = oy + Math.floor((v.x + v.y)/2) - v.z;
-    put(px, py, v.i);
+  const sorted = frame.voxels.filter(v => validVoxel(frame,v)).sort((a,b) => a.x+a.y+a.z-b.x-b.y-b.z || a.z-b.z || a.y-b.y || a.x-b.x);
+  for (const v of sorted) {
+    const color = voxelColor(frame,v.i);
+    if (!color[3]) continue;
+    for (const corners of [
+      [[0,0,1],[1,0,1],[1,1,1],[0,1,1]],
+      [[1,0,0],[1,1,0],[1,1,1],[1,0,1]],
+      [[0,1,0],[0,1,1],[1,1,1],[1,1,0]],
+    ]) {
+      const pts = corners.map(([x,y,z]) => project(v.x+x!,v.y+y!,v.z+z!));
+      triangle(pts[0]!,pts[1]!,pts[2]!,color); triangle(pts[0]!,pts[2]!,pts[3]!,color);
+    }
   }
   return png;
 }
 
 export function exportAnimationFrames(frames: VoxModelData[], folder: string, projection: Projection = "zmax") {
-  const fs = require("fs");
+  checkFrameSizes(frames);
   fs.mkdirSync(folder, { recursive: true });
   for (let i=0;i<frames.length;i++) {
     const png = renderFrameToPNG(frames[i]!, projection);
     const buf = PNG.sync.write(png);
-    fs.writeFileSync(`${folder}/frame_${String(i).padStart(4,"0")}.png`, buf);
+    writeFileNoFollow(`${folder}/frame_${String(i).padStart(4,"0")}.png`, buf);
   }
 }

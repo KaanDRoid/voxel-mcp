@@ -1,24 +1,45 @@
 import fs from "fs";
 import path from "path";
-import type { VoxModelData } from "./vox.js";
+import { defaultPalette, type VoxModelData } from "./vox.js";
 
 type ImageData = { width: number; height: number; data: Uint8Array };
 
-async function loadImage(filePath: string): Promise<ImageData> {
+function hasTransparency(img: ImageData) {
+  for (let i = 3; i < img.data.length; i += 4) if (img.data[i]! < 255) return true;
+  return false;
+}
+
+const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
+const MAX_IMAGE_PIXELS = 4 * 1024 * 1024;
+function checkDimensions(width: number, height: number) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width * height > MAX_IMAGE_PIXELS) throw new Error("Image pixel limit or invalid dimensions");
+}
+export function readImageBuffer(filePath: string): Buffer {
+  if (fs.statSync(filePath).size > MAX_IMAGE_BYTES) throw new Error("Image file size limit exceeded");
+  const buf = fs.readFileSync(filePath);
+  if (buf.length > MAX_IMAGE_BYTES) throw new Error("Image file size limit exceeded");
+  if (buf.length >= 24 && buf.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) checkDimensions(buf.readUInt32BE(16), buf.readUInt32BE(20));
+  return buf;
+}
+export async function loadImage(filePath: string): Promise<ImageData> {
   const ext = path.extname(filePath).toLowerCase();
+  const buf = readImageBuffer(filePath);
+  let img: ImageData;
   if (ext === ".png") {
     const { PNG } = await import("pngjs");
-    const buf = fs.readFileSync(filePath);
-    const png = PNG.sync.read(buf);
-    return { width: png.width, height: png.height, data: png.data };
+    img = PNG.sync.read(buf);
   } else if (ext === ".jpg" || ext === ".jpeg") {
     const jpeg = await import("jpeg-js");
-    const buf = fs.readFileSync(filePath);
-    const img = (jpeg as any).decode(buf, { useTArray: true });
-    return { width: img.width, height: img.height, data: img.data };
-  } else {
-    throw new Error(`Unsupported image format: ${ext}`);
-  }
+    img = jpeg.decode(buf, { useTArray: true, maxResolutionInMP: 4, maxMemoryUsageInMB: 128 });
+  } else throw new Error(`Unsupported image format: ${ext}`);
+  checkDimensions(img.width, img.height);
+  return img;
+}
+export function sampledDimensions(img: ImageData, downscale = 1) {
+  if (!Number.isInteger(downscale) || downscale < 1) throw new Error("Image downscale must be a positive integer");
+  const width = Math.floor(img.width / downscale), height = Math.floor(img.height / downscale);
+  if (width < 1 || height < 1) throw new Error("Sampled image dimensions must be positive");
+  return { width, height };
 }
 
 export async function edgeDetectToVoxel(
@@ -27,9 +48,8 @@ export async function edgeDetectToVoxel(
   opts: { threshold?: number; downscale?: number; i?: number; z?: number }
 ) {
   const img = await loadImage(imagePath);
-  const ds = Math.max(1, opts.downscale ?? 1);
-  const width = Math.floor(img.width / ds);
-  const height = Math.floor(img.height / ds);
+  const ds = opts.downscale ?? 1;
+  const { width, height } = sampledDimensions(img, ds);
   const threshold = opts.threshold ?? 64;
   const outZ = clamp(opts.z ?? 0, 0, model.sizeZ - 1);
   const gs = new Uint8Array(width * height);
@@ -38,6 +58,7 @@ export async function edgeDetectToVoxel(
       const sx = Math.min(img.width - 1, x * ds);
       const sy = Math.min(img.height - 1, y * ds);
       const idx = (sy * img.width + sx) * 4;
+      if (x >= model.sizeX || y >= model.sizeY || img.data[idx + 3] === 0) continue;
       const r = img.data[idx + 0] ?? 0;
       const g = img.data[idx + 1] ?? 0;
       const b = img.data[idx + 2] ?? 0;
@@ -55,7 +76,7 @@ export async function edgeDetectToVoxel(
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const m = sobel(x, y);
-      if (m >= threshold) {
+      if (m >= threshold && x < model.sizeX && y < model.sizeY && img.data[((y * ds) * img.width + x * ds) * 4 + 3]! > 0) {
         const vx = clamp(x, 0, model.sizeX - 1);
         const vy = clamp(y, 0, model.sizeY - 1);
         model.voxels.push({ x: vx, y: vy, z: outZ, i: colorIndex });
@@ -70,9 +91,8 @@ export async function depthMapToVoxel(
   opts: { invert?: boolean; downscale?: number; i?: number }
 ) {
   const img = await loadImage(imagePath);
-  const ds = Math.max(1, opts.downscale ?? 1);
-  const width = Math.floor(img.width / ds);
-  const height = Math.floor(img.height / ds);
+  const ds = opts.downscale ?? 1;
+  const { width, height } = sampledDimensions(img, ds);
   const invert = !!opts.invert;
   const colorIndex = Math.max(1, Math.min(255, opts.i ?? 180));
   for (let y = 0; y < height; y++) {
@@ -80,6 +100,7 @@ export async function depthMapToVoxel(
       const sx = Math.min(img.width - 1, x * ds);
       const sy = Math.min(img.height - 1, y * ds);
       const idx = (sy * img.width + sx) * 4;
+      if (x >= model.sizeX || y >= model.sizeY || img.data[idx + 3] === 0) continue;
       const r = img.data[idx + 0] ?? 0;
       const g = img.data[idx + 1] ?? 0;
       const b = img.data[idx + 2] ?? 0;
@@ -104,14 +125,15 @@ export async function multiViewToVoxel(
     colorFrom?: "top" | "front" | "side" | "none";
   }
 ) {
-  const ds = Math.max(1, opts.downscale ?? 1);
+  const ds = opts.downscale ?? 1;
   const threshold = opts.threshold ?? 16;
 
   const loadMask = async (p?: string) => {
     if (!p) return null as null | { w: number; h: number; data: Uint8Array; rgba: Uint8Array };
     const img = await loadImage(p);
-    const w = Math.floor(img.width / ds), h = Math.floor(img.height / ds);
+    const { width: w, height: h } = sampledDimensions(img, ds);
     const mask = new Uint8Array(w * h);
+    const alpha = hasTransparency(img);
     const rgba = new Uint8Array(w * h * 4);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
@@ -123,7 +145,7 @@ export async function multiViewToVoxel(
         const b = img.data[idx + 2] ?? 0;
         const a = img.data[idx + 3] ?? 255;
         const lum = Math.round(0.299 * Number(r) + 0.587 * Number(g) + 0.114 * Number(b));
-        mask[y * w + x] = a >= threshold || lum >= threshold ? 1 : 0;
+        mask[y * w + x] = (alpha ? a > 0 && a >= threshold : lum >= threshold) ? 1 : 0;
         rgba.set([r, g, b, a], (y * w + x) * 4);
       }
     }
@@ -136,6 +158,7 @@ export async function multiViewToVoxel(
 
   if (!front && !side && !top) throw new Error("At least one of frontPath/sidePath/topPath is required");
 
+  const colorIndex = createColorMapper(model);
   const colorFrom = opts.colorFrom ?? (top ? "top" : front ? "front" : side ? "side" : "none");
 
   for (let z = 0; z < model.sizeZ; z++) {
@@ -170,7 +193,7 @@ export async function multiViewToVoxel(
           const r = src!.rgba[base + 0] ?? 0;
           const g = src!.rgba[base + 1] ?? 0;
           const b = src!.rgba[base + 2] ?? 0;
-          return rgbToPaletteIndex(r, g, b);
+          return colorIndex(r, g, b);
         };
         if (colorFrom === "top" && top) {
           const tx = Math.min(top.w - 1, Math.floor((x / Math.max(1, model.sizeX - 1)) * (top.w - 1)));
@@ -196,11 +219,32 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
 }
 
-function rgbToPaletteIndex(r: number, g: number, b: number): number {
-  const rq = Math.floor(r / 51);
-  const gq = Math.floor(g / 51);
-  const bq = Math.floor(b / 51);
-  return Math.max(1, Math.min(255, 1 + rq * 36 + gq * 6 + bq));
+export function createColorMapper(model: VoxModelData) {
+  const palette = model.palette ?? defaultPalette();
+  const used = new Set(model.voxels.map(v => v.i));
+  const cache = new Map<number, number>();
+  for (let i = 1; i < 256; i++) if (!cache.has(palette[i]!)) cache.set(palette[i]!, i);
+  return (r: number, g: number, b: number): number => {
+    const packed = (0xff000000 | (b << 16) | (g << 8) | r) >>> 0;
+    const exact = cache.get(packed);
+    if (exact !== undefined) { used.add(exact); return exact; }
+    for (let i = 1; i < 256; i++) if (!used.has(i)) {
+      model.palette = palette;
+      if (cache.get(palette[i]!) === i) cache.delete(palette[i]!);
+      palette[i] = packed;
+      cache.set(packed, i);
+      used.add(i);
+      return i;
+    }
+    let nearest = 1, distance = Infinity;
+    for (let i = 1; i < 256; i++) {
+      const c = palette[i]!;
+      const d = ((c & 255) - r) ** 2 + (((c >>> 8) & 255) - g) ** 2 + (((c >>> 16) & 255) - b) ** 2;
+      if (d < distance) { distance = d; nearest = i; }
+    }
+    cache.set(packed, nearest);
+    return nearest;
+  };
 }
 
 export async function imageToVoxelColorized(
@@ -209,9 +253,9 @@ export async function imageToVoxelColorized(
   opts: { mode?: "flat" | "heightmap"; maxZ?: number; threshold?: number; downscale?: number }
 ) {
   const img = await loadImage(imagePath);
-  const ds = Math.max(1, opts.downscale ?? 1);
-  const width = Math.floor(img.width / ds);
-  const height = Math.floor(img.height / ds);
+  const ds = opts.downscale ?? 1;
+  const { width, height } = sampledDimensions(img, ds);
+  const colorIndex = createColorMapper(model);
   const mode = opts.mode ?? "flat";
   const maxZ = Math.max(1, opts.maxZ ?? model.sizeZ);
   const threshold = opts.threshold ?? 16;
@@ -220,13 +264,14 @@ export async function imageToVoxelColorized(
       const sx = Math.min(img.width - 1, x * ds);
       const sy = Math.min(img.height - 1, y * ds);
       const idx = (sy * img.width + sx) * 4;
+      if (x >= model.sizeX || y >= model.sizeY || img.data[idx + 3] === 0) continue;
       const r = img.data[idx + 0] ?? 0;
       const g = img.data[idx + 1] ?? 0;
       const b = img.data[idx + 2] ?? 0;
       const a = img.data[idx + 3] ?? 255;
-      if (a < threshold) continue;
+      if (a === 0 || a < threshold || x >= model.sizeX || y >= model.sizeY) continue;
       const lum = Math.round(0.299 * Number(r) + 0.587 * Number(g) + 0.114 * Number(b));
-      const i = rgbToPaletteIndex(r, g, b);
+      const i = colorIndex(r, g, b);
       const vx = clamp(x, 0, model.sizeX - 1);
       const vy = clamp(y, 0, model.sizeY - 1);
       if (mode === "flat") {
@@ -245,23 +290,25 @@ export async function silhouetteTo3D(
   opts: { thickness: number; threshold?: number; downscale?: number }
 ) {
   const img = await loadImage(imagePath);
-  const ds = Math.max(1, opts.downscale ?? 1);
-  const width = Math.floor(img.width / ds);
-  const height = Math.floor(img.height / ds);
+  const ds = opts.downscale ?? 1;
+  const { width, height } = sampledDimensions(img, ds);
   const threshold = opts.threshold ?? 16;
+  const colorIndex = createColorMapper(model);
   const thickness = Math.max(1, Math.min(model.sizeZ, opts.thickness));
+  const alpha = hasTransparency(img);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const sx = Math.min(img.width - 1, x * ds);
       const sy = Math.min(img.height - 1, y * ds);
       const idx = (sy * img.width + sx) * 4;
+      if (x >= model.sizeX || y >= model.sizeY || img.data[idx + 3] === 0) continue;
       const r = img.data[idx + 0] ?? 0;
       const g = img.data[idx + 1] ?? 0;
       const b = img.data[idx + 2] ?? 0;
       const a = img.data[idx + 3] ?? 255;
       const lum = Math.round(0.299 * Number(r) + 0.587 * Number(g) + 0.114 * Number(b));
-      if (a < threshold && lum < threshold) continue;
-      const i = rgbToPaletteIndex(r, g, b);
+      if (alpha ? a === 0 || a < threshold : lum < threshold) continue;
+      const i = colorIndex(r, g, b);
       const vx = clamp(x, 0, model.sizeX - 1);
       const vy = clamp(y, 0, model.sizeY - 1);
       for (let z = 0; z < thickness && z < model.sizeZ; z++) model.voxels.push({ x: vx, y: vy, z, i });

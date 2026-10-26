@@ -1,5 +1,3 @@
-import fs from "fs";
-import path from "path";
 import { fillBox, fillSphere, fillCylinder, fillCone, fillPyramid, drawLine, clamp } from "./model.js";
 import type { VoxModelData, Voxel } from "./vox.js";
 
@@ -11,36 +9,9 @@ function createRng(seed: number) {
   };
 }
 
-// ============== IMAGE UTILITIES ==============
-type ImageData = { width: number; height: number; data: Uint8Array };
+import { loadImage, sampledDimensions, createColorMapper } from "./image.js";
 
-async function loadImage(filePath: string): Promise<ImageData> {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === ".png") {
-    const { PNG } = await import("pngjs");
-    const buf = fs.readFileSync(filePath);
-    const png = PNG.sync.read(buf);
-    return { width: png.width, height: png.height, data: png.data };
-  } else if (ext === ".jpg" || ext === ".jpeg") {
-    const jpeg = await import("jpeg-js");
-    const buf = fs.readFileSync(filePath);
-    const img = (jpeg as any).decode(buf, { useTArray: true });
-    return { width: img.width, height: img.height, data: img.data };
-  } else {
-    throw new Error(`Unsupported image format: ${ext}`);
-  }
-}
-
-function rgbToPaletteIndex(r: number, g: number, b: number): number {
-  // Map RGB to a palette index (1-255)
-  // Simple quantization: 6x6x6 color cube + grayscale
-  const rq = Math.floor(r / 51); // 0-5
-  const gq = Math.floor(g / 51); // 0-5
-  const bq = Math.floor(b / 51); // 0-5
-  return Math.max(1, Math.min(255, 1 + rq * 36 + gq * 6 + bq));
-}
-
-export function generateHouse(model: VoxModelData, opts: { floors: number; style: string; seed: number }) {
+function generateHouseImpl(model: VoxModelData, opts: { floors: number; style: string; seed: number }) {
   const { sizeX, sizeY, sizeZ } = model;
   const margin = Math.max(2, Math.floor(Math.min(sizeX, sizeY) * 0.05));
   const footprint = {
@@ -116,7 +87,7 @@ export function generateHouse(model: VoxModelData, opts: { floors: number; style
   }
 }
 
-export function generateCharacter(model: VoxModelData, opts: { style: string; seed: number }) {
+function generateCharacterImpl(model: VoxModelData, opts: { style: string; seed: number }) {
   const { sizeX, sizeY, sizeZ } = model;
   const cx = Math.floor(sizeX / 2);
   const cy = Math.floor(sizeY / 2);
@@ -137,7 +108,7 @@ export function generateCharacter(model: VoxModelData, opts: { style: string; se
   model.voxels.push({ x: cx + 2, y: cy + 3, z: base + 30, i: 250 });
 }
 
-export function generateVehicle(
+function generateVehicleImpl(
   model: VoxModelData,
   opts: { type: "car" | "truck" | "spaceship" | "boat" | "plane" | "tank" | "motorcycle" | "helicopter"; style?: "realistic" | "cartoon" | "lowpoly" | "scifi"; seed?: number }
 ) {
@@ -200,7 +171,7 @@ export function generateVehicle(
   }
 }
 
-export function generateFurniture(
+function generateFurnitureImpl(
   model: VoxModelData,
   opts: { type: "chair" | "table" | "bed" | "shelf" | "lamp" | "sofa" | "desk" | "cabinet"; style?: "modern" | "classic" | "medieval" | "scifi"; seed?: number }
 ) {
@@ -267,10 +238,12 @@ export function generateFurniture(
       break;
     }
     case "desk": {
-      fillBox(model, cx - 8, cy - 4, base + 8, cx + 8, cy + 4, base + 9, wood);
+      const left = Math.max(0, cx - 8), right = Math.min(sizeX - 1, cx + 8);
+      const top = Math.min(sizeZ - 2, base + 8);
+      fillBox(model, left, cy - 4, top, right, cy + 4, top + 1, wood);
       // legs/drawers
-      fillBox(model, cx - 8, cy - 4, base, cx - 7, cy + 4, base + 8, wood);
-      fillBox(model, cx + 7, cy - 4, base, cx + 8, cy + 4, base + 8, wood);
+      fillBox(model, left, cy - 4, base, left + 1, cy + 4, top, wood);
+      fillBox(model, right - 1, cy - 4, base, right, cy + 4, top, wood);
       break;
     }
     case "cabinet": {
@@ -284,7 +257,7 @@ export function generateFurniture(
   }
 }
 
-export function generateWeapon(
+function generateWeaponImpl(
   model: VoxModelData,
   opts: { type: "sword" | "axe" | "hammer" | "spear" | "bow" | "gun" | "staff" | "shield" | "dagger"; style?: "medieval" | "fantasy" | "scifi" | "steampunk"; seed?: number }
 ) {
@@ -353,7 +326,7 @@ export function generateWeapon(
   }
 }
 
-export function generateStructure(
+function generateStructureImpl(
   model: VoxModelData,
   opts: { type: "castle" | "tower" | "bridge" | "wall" | "gate" | "temple" | "pyramid" | "lighthouse"; style?: "medieval" | "asian" | "modern" | "fantasy"; seed?: number }
 ) {
@@ -426,7 +399,7 @@ export function generateStructure(
   }
 }
 
-export function generateCreature(
+function generateCreatureImpl(
   model: VoxModelData,
   opts: { type: "dog" | "cat" | "bird" | "fish" | "dragon" | "horse" | "snake" | "spider" | "robot"; style?: "realistic" | "cute" | "monster" | "cartoon"; seed?: number }
 ) {
@@ -475,7 +448,7 @@ export function generateCreature(
   }
 }
 
-export function generateNature(
+function generateNatureImpl(
   model: VoxModelData,
   opts: { type: "rock" | "crystal" | "cloud" | "mountain" | "island" | "cave" | "mushroom" | "flower"; seed?: number }
 ) {
@@ -528,7 +501,7 @@ export function generateNature(
 
 // ===== Nightlife Set - City/Interior/Characters =====
 
-export function generateAnkaraBlock(model: VoxModelData, opts: { roads?: boolean; seed?: number }) {
+function generateAnkaraBlockImpl(model: VoxModelData, opts: { roads?: boolean; seed?: number }) {
   const { sizeX, sizeY, sizeZ } = model;
   const rng = createRng(opts.seed ?? 42);
   const roadI = 20, buildingI = 100, glassI = 180, neonI = 230;
@@ -567,7 +540,7 @@ export function generateAnkaraBlock(model: VoxModelData, opts: { roads?: boolean
   }
 }
 
-export function generateVenueInterior(model: VoxModelData, opts: { seed?: number }) {
+function generateVenueInteriorImpl(model: VoxModelData, opts: { seed?: number }) {
   const { sizeX, sizeY } = model; const base=0;
   // stage
   fillBox(model, 2, 2, base, sizeX-3, 6, base+1, 120);
@@ -579,7 +552,7 @@ export function generateVenueInterior(model: VoxModelData, opts: { seed?: number
   for (let x=3; x<sizeX-3; x+=4) model.voxels.push({ x, y: 3, z: 3, i: 230 });
 }
 
-export function generateVenueCharacter(model: VoxModelData, opts: { role: "konsomatris"|"musteri"|"garson"|"asci"|"polis"|"mafya"|"behzatc"; seed?: number }) {
+function generateVenueCharacterImpl(model: VoxModelData, opts: { role: "konsomatris"|"musteri"|"garson"|"asci"|"polis"|"mafya"|"behzatc"; seed?: number }) {
   // Simple humanoid with color scheme per role
   const { sizeX, sizeY, sizeZ } = model; const cx=Math.floor(sizeX/2), cy=Math.floor(sizeY/2), b=1;
   const colors: Record<string, [number,number,number,number,number]> = {
@@ -609,7 +582,7 @@ export function generateVenueCharacter(model: VoxModelData, opts: { role: "konso
 // ===== STAFF CHARACTERS =====
 export type StaffType = "barman" | "chef" | "cleaner" | "konsomatris" | "musician" | "security" | "waiter";
 
-export function generateStaff(
+function generateStaffImpl(
   model: VoxModelData,
   opts: { type: StaffType; style?: "default" | "fancy" | "casual"; seed?: number }
 ) {
@@ -766,7 +739,7 @@ export type CustomerType =
   | "regular" | "worker" | "elite" | "nostalgic" | "emotional" | "young"
   | "bureaucrat" | "undercover" | "sapkali" | "gangster" | "foreign" | "vip" | "behzatc";
 
-export function generateCustomer(
+function generateCustomerImpl(
   model: VoxModelData,
   opts: { type: CustomerType; pose?: "standing" | "sitting" | "drinking"; seed?: number }
 ) {
@@ -1012,7 +985,7 @@ export function generateCustomer(
   }
 }
 
-export async function generateFromPrompt(model: VoxModelData, prompt: string, opts: { seed: number }) {
+async function generateFromPromptImpl(model: VoxModelData, prompt: string, opts: { seed: number }) {
   const p = prompt.toLowerCase();
   if (/(ev|house|bina)/.test(p)) {
     const m = /\b(\d+)\s*kat/.exec(p);
@@ -1055,30 +1028,32 @@ export async function imageToVoxel(
   opts: { mode: "heightmap" | "extrude"; maxZ: number; threshold: number; downscale: number }
 ) {
   const img = await loadImage(imagePath);
-  const ds = Math.max(1, opts.downscale);
-  const width = Math.floor(img.width / ds);
-  const height = Math.floor(img.height / ds);
+  const colorIndex = createColorMapper(model);
+  const ds = opts.downscale;
+  const { width, height } = sampledDimensions(img, ds);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const sx = Math.min(img.width - 1, x * ds);
       const sy = Math.min(img.height - 1, y * ds);
       const idx = (sy * img.width + sx) * 4;
+      if (x >= model.sizeX || y >= model.sizeY || img.data[idx + 3] === 0) continue;
       const r = img.data[idx + 0] ?? 0;
       const g = img.data[idx + 1] ?? 0;
       const b = img.data[idx + 2] ?? 0;
       const a = img.data[idx + 3] ?? 255;
       const lum = Math.round(0.299 * Number(r) + 0.587 * Number(g) + 0.114 * Number(b));
-      const vx = clamp(x, 0, model.sizeX - 1);
+      const i = colorIndex(r, g, b);
+      const vx = x;
       const vy = clamp(y, 0, model.sizeY - 1);
       if (opts.mode === "heightmap") {
         const h = Math.floor((lum / 255) * (opts.maxZ - 1));
         for (let z = 0; z <= h && z < model.sizeZ; z++) {
-          model.voxels.push({ x: vx, y: vy, z, i: Math.max(1, Math.min(255, Math.floor((lum / 255) * 255))) });
+          model.voxels.push({ x: vx, y: vy, z, i });
         }
       } else {
         if (lum >= opts.threshold) {
           for (let z = 0; z < Math.min(model.sizeZ, opts.maxZ); z++) {
-            model.voxels.push({ x: vx, y: vy, z, i: Math.max(1, Math.min(255, Math.floor((lum / 255) * 255))) });
+            model.voxels.push({ x: vx, y: vy, z, i });
           }
         }
       }
@@ -1092,3 +1067,27 @@ export async function imageToVoxel(
 
 
 
+
+// Keep procedural output bounded and resolve overlapping details last-write-wins.
+function finishGeneration(model: VoxModelData) {
+  const cells = new Map<string, Voxel>();
+  for (const v of model.voxels) {
+    if (![v.x, v.y, v.z, v.i].every(Number.isInteger) || v.x < 0 || v.y < 0 || v.z < 0 || v.x >= model.sizeX || v.y >= model.sizeY || v.z >= model.sizeZ || v.i < 1 || v.i > 255) continue;
+    cells.set(`${v.x},${v.y},${v.z}`, v);
+  }
+  model.voxels = [...cells.values()];
+}
+export function generateHouse(...args: Parameters<typeof generateHouseImpl>) { generateHouseImpl(...args); finishGeneration(args[0]); }
+export function generateCharacter(...args: Parameters<typeof generateCharacterImpl>) { generateCharacterImpl(...args); finishGeneration(args[0]); }
+export function generateVehicle(...args: Parameters<typeof generateVehicleImpl>) { generateVehicleImpl(...args); finishGeneration(args[0]); }
+export function generateFurniture(...args: Parameters<typeof generateFurnitureImpl>) { generateFurnitureImpl(...args); finishGeneration(args[0]); }
+export function generateWeapon(...args: Parameters<typeof generateWeaponImpl>) { generateWeaponImpl(...args); finishGeneration(args[0]); }
+export function generateStructure(...args: Parameters<typeof generateStructureImpl>) { generateStructureImpl(...args); finishGeneration(args[0]); }
+export function generateCreature(...args: Parameters<typeof generateCreatureImpl>) { generateCreatureImpl(...args); finishGeneration(args[0]); }
+export function generateNature(...args: Parameters<typeof generateNatureImpl>) { generateNatureImpl(...args); finishGeneration(args[0]); }
+export function generateAnkaraBlock(...args: Parameters<typeof generateAnkaraBlockImpl>) { generateAnkaraBlockImpl(...args); finishGeneration(args[0]); }
+export function generateVenueInterior(...args: Parameters<typeof generateVenueInteriorImpl>) { generateVenueInteriorImpl(...args); finishGeneration(args[0]); }
+export function generateVenueCharacter(...args: Parameters<typeof generateVenueCharacterImpl>) { generateVenueCharacterImpl(...args); finishGeneration(args[0]); }
+export function generateStaff(...args: Parameters<typeof generateStaffImpl>) { generateStaffImpl(...args); finishGeneration(args[0]); }
+export function generateCustomer(...args: Parameters<typeof generateCustomerImpl>) { generateCustomerImpl(...args); finishGeneration(args[0]); }
+export async function generateFromPrompt(...args: Parameters<typeof generateFromPromptImpl>) { await generateFromPromptImpl(...args); finishGeneration(args[0]); }
