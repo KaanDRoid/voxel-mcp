@@ -18,7 +18,7 @@ test('parses sections, quoted values, long strings and comments', () => {
 });
 
 test('resolves the $ convention only at the start of a path', () => {
-  const text = "workspace :\n{\n dir_a : [[$]]\n dir_b : [[$/x/y]]\n dir_c : [[D:/abs/$/z]]\n dir_d : [[$\w]]\n}\n";
+  const text = "workspace :\n{\n dir_a : [[$]]\n dir_b : [[$/x/y]]\n dir_c : [[D:/abs/$/z]]\n dir_d : [[$\\w]]\n}\n";
   const { config } = parseConfigText(text, 'C:/mv');
   assert.equal(config.workspace!.dir_a, 'C:/mv');
   assert.equal(config.workspace!.dir_b, 'C:/mv/x/y');
