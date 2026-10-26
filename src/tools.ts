@@ -21,6 +21,7 @@ import { registerSceneTools } from "./sceneTools.js";
 import { INSTALL_READ_ONLY_TOOLS, registerInstallTools } from "./installTools.js";
 import { openVoxFile } from "./openApp.js";
 import { FORMAT_READ_ONLY, registerFormatTools } from "./formatTools.js";
+import { registerAppControlTools } from "./appControl.js";
 
 import { registerXsTools, XS_READ_ONLY_TOOLS } from "./xsTools.js";
 
@@ -55,7 +56,7 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
               if (key === "folder" && fs.readdirSync(parameters[key] as string).some(f => fs.lstatSync(path.join(parameters[key] as string, f)).isSymbolicLink())) throw new Error("Output directory contains symbolic links");
             }
           }
-          const modelMutation = !readOnly.has(name) && !/^(export_|save_|write_)/.test(name) && !name.includes("scene") && !name.includes("animation") && !["undo", "redo", "open_in_magicavoxel", "add_frame", "set_frame_duration", "duplicate_frame", "remove_frame", "reorder_frame", "interpolate_frames"].includes(name);
+          const modelMutation = !readOnly.has(name) && !/^(export_|save_|write_)/.test(name) && !name.includes("scene") && !name.includes("animation") && !["undo", "redo", "open_in_magicavoxel", "attach_magicavoxel_app", "set_app_camera", "add_frame", "set_frame_duration", "duplicate_frame", "remove_frame", "reorder_frame", "interpolate_frames"].includes(name);
           return modelMutation
             ? await registry.transaction(() => handler(parameters as z.infer<z.ZodObject<T>>))
             : await handler(parameters as z.infer<z.ZodObject<T>>);
@@ -1317,6 +1318,7 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   );
 
   registerInstallTools({ server, register: registerTool, registry, files, config });
+  registerAppControlTools(registerTool, files, config);
 }
 
 // ===== HELPER FUNCTIONS FOR CHARACTER DESCRIPTIONS =====

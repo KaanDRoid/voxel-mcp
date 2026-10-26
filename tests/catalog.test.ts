@@ -23,7 +23,7 @@ function example(schema: Schema): unknown {
 }
 
 // Installation tools need a MagicaVoxel folder; tests/mcp-install.test.ts covers them over stdio.
-const SKIPPED = ['undo', 'redo', 'batch_edit', 'delete_animation', 'get_magicavoxel_info', 'list_magicavoxel_samples', 'list_magicavoxel_palettes', 'list_magicavoxel_shaders', 'list_magicavoxel_ibl', 'load_magicavoxel_sample'];
+const SKIPPED = ['undo', 'redo', 'batch_edit', 'delete_animation', 'get_magicavoxel_info', 'list_magicavoxel_samples', 'list_magicavoxel_palettes', 'list_magicavoxel_shaders', 'list_magicavoxel_ibl', 'load_magicavoxel_sample', 'attach_magicavoxel_app', 'set_app_camera', 'export_native_render'];
 const entry = fileURLToPath(new URL('../dist/index.js', import.meta.url));
 test('every non-scene modeling tool is exercised over stdio with real fixtures', { timeout: 120000 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'voxel-catalog-'));

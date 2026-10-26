@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "bin": { "magicvoxel-mcp": "dist/index.js" },
   "files": ["dist", "client-config", "docs", "README.md", "CHANGELOG.md", "LICENSE"],
-  "engines": { "node": ">=22" },
+  "engines": { "node": ">=22.2" },
   "repository": { "type": "git", "url": "git+https://github.com/KaanDRoid/voxel-mcp.git" },
   "bugs": { "url": "https://github.com/KaanDRoid/voxel-mcp/issues" },
   "scripts": {

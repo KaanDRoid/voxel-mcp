@@ -1,13 +1,16 @@
-import { inflateSync } from "node:zlib";
+import { crc32, inflateSync } from "node:zlib";
 import { PNG } from "pngjs";
 
 const SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const ADAM7 = [[0, 0, 8, 8], [4, 0, 8, 8], [0, 4, 4, 8], [2, 0, 4, 4], [0, 2, 2, 4], [1, 0, 2, 2], [0, 1, 1, 2]] as const;
 
-interface PngLimits { maxPixels?: number; minPixels?: number; maxInputBytes?: number }
+interface PngLimits { maxPixels?: number; minPixels?: number; maxInputBytes?: number; verifyCrc?: boolean }
 
-/** Validate dimensions and the complete inflated scanline budget before calling the image decoder. */
-export function readPngBounded(bytes: Buffer, limits: PngLimits = {}): ReturnType<typeof PNG.sync.read> {
+/**
+ * Validate the signature, header, chunk structure and the complete inflated scanline budget without decoding pixels.
+ * With verifyCrc every chunk checksum is checked as well, so a finished file can be vouched for cheaply.
+ */
+export function inspectPng(bytes: Buffer, limits: PngLimits = {}): { width: number; height: number } {
   if (bytes.length > (limits.maxInputBytes ?? 32 * 1024 * 1024)) throw new Error("PNG input size limit exceeded");
   if (bytes.length < 33 || !bytes.subarray(0, 8).equals(SIGNATURE) || bytes.readUInt32BE(8) !== 13 || bytes.toString("ascii", 12, 16) !== "IHDR") throw new Error("Invalid PNG signature or header");
   const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20);
@@ -26,6 +29,7 @@ export function readPngBounded(bytes: Buffer, limits: PngLimits = {}): ReturnTyp
     const length = bytes.readUInt32BE(offset), next = offset + length + 12;
     if (next > bytes.length) throw new Error("Truncated PNG chunk");
     const type = bytes.toString("ascii", offset + 4, offset + 8);
+    if (limits.verifyCrc && crc32(bytes.subarray(offset + 4, offset + 8 + length)) !== bytes.readUInt32BE(offset + 8 + length)) throw new Error(`PNG chunk ${type} has a bad checksum`);
     if (type === "IHDR" && offset !== 8) throw new Error("Duplicate PNG header");
     if (type === "PLTE") {
       if (palettes++) throw new Error("Duplicate PNG palette");
@@ -40,6 +44,11 @@ export function readPngBounded(bytes: Buffer, limits: PngLimits = {}): ReturnTyp
   try { inflated = inflateSync(Buffer.concat(compressed), { maxOutputLength: expected }); }
   catch { throw new Error("Decompressed PNG size limit exceeded or invalid compressed data"); }
   if (inflated.length !== expected) throw new Error("Decompressed PNG size does not match the scanline limit");
-  // pngjs checks CRCs and decodes the already bounded stream, including interlaced images.
+  return { width, height };
+}
+
+/** Validate first (see inspectPng), then decode. pngjs checks CRCs and decodes the already bounded stream. */
+export function readPngBounded(bytes: Buffer, limits: PngLimits = {}): ReturnType<typeof PNG.sync.read> {
+  inspectPng(bytes, limits);
   return PNG.sync.read(bytes);
 }
