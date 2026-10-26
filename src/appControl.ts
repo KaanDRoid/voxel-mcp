@@ -212,7 +212,7 @@ try {
         [Ui]::Press(0x41, $true); [Ui]::TypeText([string]$step.path); Start-Sleep -Milliseconds 300; [Ui]::Press(0x0D, $false)
         $gone = (Get-Date).AddSeconds(8)
         while ((Get-Date) -lt $gone -and [Ui]::Dialogs($target).Length -gt 0 -and ([Ui]::Dialogs($target) | Where-Object { $knownDialogs -notcontains $_.ToInt64() })) { Start-Sleep -Milliseconds 250 }
-        if ([Ui]::Dialogs($target) | Where-Object { $knownDialogs -notcontains $_.ToInt64() }) { throw 'The save dialog stayed open; the file name was not accepted' }
+        if ([Ui]::Dialogs($target) | Where-Object { $knownDialogs -notcontains $_.ToInt64() }) { throw 'A dialog is still open after the file name was entered; the render may nevertheless have started, so check the output folder before retrying' }
       }
       default { throw ('Unknown step: ' + $step.op) }
     }
@@ -223,7 +223,7 @@ try {
   try { [Ui]::ReleaseModifiers() } catch { }
   Emit @{ ok = $false; error = $_.Exception.Message; steps = @($log.ToArray()) }
 }
-`.replace("${MAX_STEPS}", String(MAX_STEPS));
+`;
 
 type SpawnFn = typeof spawn;
 

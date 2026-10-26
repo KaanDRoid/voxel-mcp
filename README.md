@@ -97,6 +97,8 @@ What the tools guarantee, and what they do not:
 - The console is not cleared with Backspace. The text goes into the console field as keystrokes, so the application must really be in Render mode: in the model editor the typed letters are editing shortcuts. The tools cannot check the mode.
 - The process identity and the finished file are verified. A camera command is only reported as submitted, because the application does not report its camera back.
 - Click positions (Image tab, Render button, console) are relative to the window and the `ui_scale` setting; they were calibrated on one layout. If the save dialog does not appear, the call fails instead of guessing. An application running as administrator cannot receive the input, and the call reports that.
+- The foreground check compares the process, not one specific window: an unexpected MagicaVoxel message box that has focus would receive the typed text. The save dialog is recognised as a new dialog of the pinned process, not by its title or controls.
+- Bringing the window to the front visibly interrupts whatever you are doing, and other tools wait while a render runs.
 - Only one live operation runs at a time. Final renders take as long as the application needs.
 
 ## Limits
