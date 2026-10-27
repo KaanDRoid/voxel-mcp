@@ -201,6 +201,10 @@ test('animation_to_scene bridges the supplied AnimationRegistry with native shap
   const s = decodeVOXScene(encodeVOXScene(h.scenes.get(result.sceneId)!));
   const shape = s.nodes.find(n => n.type === 'nSHP'); assert.equal(shape?.type, 'nSHP'); if (shape?.type !== 'nSHP') return;
   assert.deepEqual(shape.models.map(m => [m.modelId, m.attributes._f]), [[0, '0'], [1, '1']]);
+  assert.equal(s.nodes.find(n => n.id === 1)?.type, 'nGRP', 'native animation needs a world group above object tracks');
+  assert.equal(s.nodes.find(n => n.id === 2)?.type, 'nTRN');
+  assert.equal(shape.id, 3);
+  assert.equal(shape.attributes._loop, '0');
   assert.equal(s.nodes[0]!.attributes._name, 'Walk'); assert.equal(s.nodes[0]!.attributes.animation_fps, '10');
   assert.equal(s.nodes[0]!.attributes.animation_duration_ms, '350');
   assert.equal(JSON.stringify(animations.getData(id)), before);

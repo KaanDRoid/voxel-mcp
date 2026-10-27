@@ -27,7 +27,7 @@ when changing the selection.
 | `palette` | Palette loading/writing, quantization, remapping, color helpers and installed-palette selection. |
 | `formats` | Mesh, voxel-grid and Minecraft format import/export. |
 | `shaders` | XS source inspection, validation, templates, writing and bounded evaluation. |
-| `app` | Application launch, attachment, live camera commands and native final render. |
+| `app` | Application launch/attachment, live camera commands, explicit native camera snapshots and native Photo/Turntable/Anim final renders. |
 
 Blank or unset enables all groups. Names are lowercase and case-sensitive;
 unknown groups or empty comma-separated entries are startup errors. A selected

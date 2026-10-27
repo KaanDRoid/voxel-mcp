@@ -5,6 +5,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-27
+
+### Added
+
+- `export_app_camera_snapshot`: actual live camera readback through a fresh native VOX Save As snapshot, with explicit camera-slot and active-filename side effects.
+- `export_native_sequence`: native Turntable and Anim Final Render, inclusive animation indices, bounded frame counts and per-frame stable-file/PNG-CRC/dimension verification.
+- Native workflow documentation, supervised color-changing animation checks and a preservation/compatibility matrix for every format family.
+- Portable native-output verifier regressions alongside Windows UI and real-protocol opt-in coverage.
+
+### Fixed
+
+- Native save paths target a positively identified filename control with exact dialog/field focus checks; pre-existing and unexpected dialogs stop input.
+- Helper scripts and payloads travel over ASCII-safe stdin envelopes, keeping the Windows command line short as the UI adapter grows.
+- Photo rendering explicitly selects Photo after a sequence instead of reusing the previous image mode.
+- `animation_to_scene` emits the native world/group/object/shape hierarchy, an object layer and shape `_loop`, rather than a root shape that can fail native animation playback.
+
+
 ## [1.4.0] - 2026-10-27
 
 ### Added

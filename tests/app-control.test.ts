@@ -147,7 +147,7 @@ test('a native render is reported only after the finished PNG has the requested 
   const verified = result.value.verified as { fileStableSeconds: number };
   assert.ok(Number.isInteger(verified.fileStableSeconds) && verified.fileStableSeconds >= 0);
   assert.deepEqual({ ...verified, fileStableSeconds: 0 }, { fileStableSeconds: 0, regularFileInsideWorkspace: true, writtenByThisRun: true, pngStructureAndChecksums: true, dimensions: true });
-  assert.deepEqual(f.steps[0]!.map(s => s.op), ['console', 'console', 'image_tab', 'render_button', 'save_dialog']);
+  assert.deepEqual(f.steps[0]!.map(s => s.op), ['console', 'console', 'image_tab', 'image_mode', 'render_button', 'save_dialog']);
   assert.deepEqual(f.steps[0]!.slice(0, 2).map(s => s.text), ['set pt_photo_w 64', 'set pt_photo_h 48']);
   assert.equal(f.steps[0]!.at(-1)!.path, f.out.replace(/\//g, '\\'));
 });
@@ -188,12 +188,20 @@ test('over the real protocol the shared parameter limits do not reject a full-si
   try {
     await client.connect(transport);
     const names = (await client.listTools()).tools.map(tool => tool.name);
-    for (const name of ['attach_magicavoxel_app', 'set_app_camera', 'export_native_render']) assert.ok(names.includes(name), name);
+    for (const name of ['attach_magicavoxel_app', 'set_app_camera', 'export_native_render', 'export_app_camera_snapshot', 'export_native_sequence']) assert.ok(names.includes(name), name);
     const result = await client.callTool({ name: 'export_native_render', arguments: { path: 'out/render.png', imageWidth: 1920, imageHeight: 1080 } });
     assert.equal(result.isError, true);
     const message = (result.content as { text: string }[])[0]!.text;
     assert.match(message, process.platform === 'win32' ? /MAGICVOXEL_MCP_UI_AUTOMATION=1/ : /only available on Windows/);
     assert.doesNotMatch(message, /exceeds/);
+    for (const [name, args] of [
+      ['export_app_camera_snapshot', { path: 'out/camera.vox', cameraId: 9 }],
+      ['export_native_sequence', { path: 'out/spin.png', kind: 'turntable', frames: 2 }],
+    ] as const) {
+      const disabled = await client.callTool({ name, arguments: args });
+      assert.equal(disabled.isError, true);
+      assert.match((disabled.content as { text: string }[])[0]!.text, process.platform === 'win32' ? /MAGICVOXEL_MCP_UI_AUTOMATION=1/ : /only available on Windows/);
+    }
   } finally { await client.close(); await transport.close(); }
 });
 
@@ -282,5 +290,6 @@ test('non-ASCII input is escaped so no console code page can alter it', async ()
   child.stdout.write('{"ok":true}\n'); child.emit('close', 0);
   assert.deepEqual(await promise, { ok: true });
   assert.ok(/^[\x00-\x7f]*$/.test(written), 'only ASCII reaches the helper');
-  assert.deepEqual(JSON.parse(written), { path: 'C:\\Users\\\u00fcser\\\u4e2d.png' });
+  assert.equal(JSON.parse(written).script, 'x');
+  assert.deepEqual(JSON.parse(JSON.parse(written).payload), { path: 'C:\\Users\\\u00fcser\\\u4e2d.png' });
 });

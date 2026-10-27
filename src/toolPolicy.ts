@@ -92,7 +92,7 @@ declare("shaders", "run_xs_shader", ["file-read", "model-mutation"], readPath);
 declare("app", "open_in_magicavoxel", ["file-read", "app-launch"], readPath);
 declare("app", "attach_magicavoxel_app", ["session-mutation"]);
 declare("app", "set_app_camera", ["app-input"]);
-declare("app", "export_native_render", ["app-input", "file-write"], writePath);
+declare("app", "export_native_render export_app_camera_snapshot export_native_sequence", ["app-input", "file-write"], writePath);
 
 export const KNOWN_TOOL_NAMES: readonly string[] = Object.freeze([...policies.keys()]);
 
