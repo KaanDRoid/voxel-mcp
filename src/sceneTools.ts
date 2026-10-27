@@ -2,25 +2,36 @@ import fs from "node:fs";
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { ModelRegistry, cloneModel } from "./model.js";
-import { cloneScene, createVOXScene, decodeVOXScene, encodeVOXScene, estimateSceneBytes, indexScene, listScene, paletteMismatch, scenePalette, setSceneNodeAttributes, setSceneTransform, validateScene } from "./scene.js";
+import { cloneScene, createVOXScene, decodeVOXScene, encodeVOXScene, indexScene, listScene, paletteMismatch, scenePalette, setSceneNodeAttributes, setSceneTransform, validateScene } from "./scene.js";
 import type { VoxScene } from "./scene.js";
 import { bakeModelInstance, flattenScene } from "./sceneBake.js";
 import { remapModelToPalette } from "./paletteRemap.js";
 import { defaultPalette } from "./vox.js";
 import { RENDER_OBJECT_TYPES } from "./voxChunks.js";
+import type { AnimationRegistry } from "./animation.js";
+import { registerScenePresetTools } from "./scenePresets.js";
+import { registerSceneAnimationTools } from "./sceneAnimation.js";
+import { preflightSceneFile, preflightSceneModels, preflightSceneAddition, preflightSceneDuplicate, SCENE_INPUT_BYTES, SCENE_TRANSIENT_BYTES, addSceneObject, duplicateSceneObject, removeSceneObject, reparentSceneObject, sceneStorageBytes, trimSceneHistory, type SceneStorageOptions } from "./sceneEditing.js";
 
 type RegisterTool = <T extends z.ZodRawShape>(definition: { name: string; description: string; inputSchema: z.ZodObject<T> }, handler: (args: z.infer<z.ZodObject<T>>) => Promise<CallToolResult>) => void;
 const text = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value) }] });
 const dictionary = z.record(z.string().max(128), z.string().max(4096)).refine(v => Object.keys(v).length <= 64, "At most 64 properties are supported");
 const lenientFlag = z.boolean().default(false).describe("Recover from duplicate voxels, invalid UTF-8 and malformed render chunks instead of failing; problems are returned as warnings");
 
-interface SceneEntry { scene: VoxScene; /** Serialized form, filled lazily and dropped on every edit. */ bytes?: Buffer }
+interface SceneEntry { scene: VoxScene; past: VoxScene[]; future: VoxScene[]; /** Serialized form, filled lazily and dropped on every edit. */ bytes?: Buffer }
 
 /**
  * Scenes are kept parsed in memory. Edits run on a copy-on-write snapshot that replaces the stored scene only
  * after validation succeeds, so a failed edit cannot alter an open scene. Serialization happens in save_scene.
  */
-export function registerSceneTools(register: RegisterTool, registry: ModelRegistry): void {
+export function registerSceneTools(register: RegisterTool, registry: ModelRegistry, options: SceneStorageOptions = {}, animations?: AnimationRegistry): void {
+  const limits = { historyLimit: 16, maxHistoryBytes: 16 * 1024 * 1024, maxStorageBytes: 64 * 1024 * 1024, maxScenes: 8, ...options };
+  for (const value of Object.values(limits)) if (!Number.isSafeInteger(value) || value < 0) throw new Error("Scene limits must be nonnegative safe integers");
+  const trim = (value: SceneEntry): SceneEntry => {
+    trimSceneHistory(value.past, value.future, limits.historyLimit, limits.maxHistoryBytes);
+    return value;
+  };
+  const storedBytes = (value: SceneEntry): number => [value.scene, ...value.past, ...value.future].reduce((sum, scene) => sum + sceneStorageBytes(scene), 0);
   const scenes = new Map<string, SceneEntry>();
   let nextId = 1;
   const entry = (sceneId: string): SceneEntry => {
@@ -31,24 +42,93 @@ export function registerSceneTools(register: RegisterTool, registry: ModelRegist
   /** Read-only view of the stored scene (never mutate it). */
   const peek = (sceneId: string): VoxScene => entry(sceneId).scene;
   /** Editable snapshot of the stored scene; changes only take effect through commit(). */
-  const get = (sceneId: string): VoxScene => cloneScene(entry(sceneId).scene);
+  const get = (sceneId: string): VoxScene => {
+    const scene = entry(sceneId).scene;
+    sceneStorageBytes(scene, Math.min(limits.maxStorageBytes, SCENE_TRANSIENT_BYTES));
+    return cloneScene(scene);
+  };
+  const newSceneCapacity = (scene?: VoxScene): void => {
+    if (scenes.size >= limits.maxScenes) throw new Error(`Scene limit exceeded (${limits.maxScenes})`);
+    if (scene) {
+      const bytes = sceneStorageBytes(scene, Math.min(limits.maxStorageBytes, SCENE_TRANSIENT_BYTES));
+      let total = bytes;
+      for (const value of scenes.values()) total += storedBytes(value);
+      if (total > limits.maxStorageBytes) throw new Error(`Scene storage limit exceeded (${limits.maxStorageBytes} bytes including history)`);
+    }
+  };
+  const editCapacity = (sceneId: string): number => {
+    const current = entry(sceneId), past = [...current.past, current.scene];
+    trimSceneHistory(past, [], limits.historyLimit, limits.maxHistoryBytes);
+    let used = 0;
+    for (const [id, value] of scenes) if (id !== sceneId) used += storedBytes(value);
+    for (const snapshot of past) used += sceneStorageBytes(snapshot);
+    return Math.max(0, Math.min(SCENE_TRANSIENT_BYTES, limits.maxStorageBytes - used));
+  };
   const commit = (scene: VoxScene, sceneId?: string): string => {
-    if (!sceneId && scenes.size >= 8) throw new Error("Scene limit exceeded (8)");
+    if (!sceneId && scenes.size >= limits.maxScenes) throw new Error(`Scene limit exceeded (${limits.maxScenes})`);
+    sceneStorageBytes(scene, Math.min(limits.maxStorageBytes, SCENE_TRANSIENT_BYTES));
     validateScene(scene);
-    const size = estimateSceneBytes(scene);
-    const total = [...scenes].reduce((sum, [id, data]) => sum + (id === sceneId ? 0 : estimateSceneBytes(data.scene)), size);
-    if (total > 64 * 1024 * 1024) throw new Error("Scene storage limit exceeded (64 MiB)");
+    const previous = sceneId ? entry(sceneId) : undefined;
+    const candidate = trim({ scene, past: previous ? [...previous.past, previous.scene] : [], future: [] });
+    const total = [...scenes].reduce((sum, [id, data]) => sum + (id === sceneId ? 0 : storedBytes(data)), storedBytes(candidate));
+    if (total > limits.maxStorageBytes) throw new Error(`Scene storage limit exceeded (${limits.maxStorageBytes} bytes including history)`);
     const id = sceneId ?? `s${nextId++}`;
-    scenes.set(id, { scene });
+    scenes.set(id, candidate);
     return id;
   };
+  registerScenePresetTools(register, { get, commit });
+  registerSceneAnimationTools(register, { get, commit, peek }, registry, animations);
   const serialized = (e: SceneEntry): Buffer => (e.bytes ??= encodeVOXScene(e.scene));
   const index = (scene: VoxScene, modelIndex: number) => {
     if (!scene.models[modelIndex]) throw new Error("Scene model index not found");
     return scene.models[modelIndex]!;
   };
-  register({ name: "create_scene", description: "Create a scene with named objects and a default layer from models sharing a palette", inputSchema: z.object({ modelIds: z.array(z.string()).min(1).max(64) }).strict() }, async ({ modelIds }) => {
-    const scene = createVOXScene(modelIds.map(id => registry.get(id)));
+  register({ name: "undo_scene", description: "Undo the last successful edit to this scene, including geometry replacements, graph, layer, material, camera and render setters. Per-scene history defaults to 16 snapshots and 16 MiB; total scene storage including history defaults to 64 MiB (conservative estimates, not file sizes). Oldest history is evicted when bounded; an oversized snapshot may not be undoable. Create/load starts empty history; delete discards it permanently. Does not undo registry edits or files saved to disk.", inputSchema: z.object({ sceneId: z.string() }).strict() }, async ({ sceneId }) => {
+    const current = entry(sceneId), previous = current.past.at(-1);
+    if (!previous) return text({ sceneId, undone: false });
+    scenes.set(sceneId, trim({ scene: previous, past: current.past.slice(0, -1), future: [...current.future, current.scene] }));
+    return text({ sceneId, undone: true });
+  });
+  register({ name: "redo_scene", description: "Redo one undone scene edit, if retained within the history budget. Every successful edit clears this scene's redo stack; failed edits and reads preserve it. Create/load has no redo, and deleting a scene discards its history. Does not modify registry models or saved files.", inputSchema: z.object({ sceneId: z.string() }).strict() }, async ({ sceneId }) => {
+    const current = entry(sceneId), next = current.future.at(-1);
+    if (!next) return text({ sceneId, redone: false });
+    scenes.set(sceneId, trim({ scene: next, past: [...current.past, current.scene], future: current.future.slice(0, -1) }));
+    return text({ sceneId, redone: true });
+  });
+  register({ name: "delete_scene_layer", description: "Delete a layer. If transforms use it, reassignTo is mandatory and must be another existing layer or -1 (no layer). Reassigns all affected transforms atomically. Undoable.", inputSchema: z.object({ sceneId: z.string(), layerId: z.number().int().min(0), reassignTo: z.number().int().min(-1).optional() }).strict() }, async ({ sceneId, layerId, reassignTo }) => {
+    const scene = get(sceneId), lookup = indexScene(scene);
+    if (!lookup.layers.has(layerId)) throw new Error("Scene layer not found");
+    const affected = scene.nodes.filter(n => n.type === "nTRN" && n.layerId === layerId);
+    if (affected.length && reassignTo === undefined) throw new Error("Used layer requires explicit reassignTo");
+    if (reassignTo !== undefined && (reassignTo === layerId || (reassignTo !== -1 && !lookup.layers.has(reassignTo)))) throw new Error("Reassignment layer must be another existing layer or -1");
+    for (const node of affected) if (node.type === "nTRN") node.layerId = reassignTo!;
+    scene.layers = scene.layers.filter(l => l.id !== layerId);
+    commit(scene, sceneId); return text({ sceneId, layerId, reassignedNodes: affected.length });
+  });
+  register({ name: "reparent_scene_object", description: "Move a node from ALL parent groups into parentId (an existing group), or make it a root when omitted. Local transforms are unchanged. Rejects cycles and required transform-child detachment; shared placements all move together. Undoable.", inputSchema: z.object({ sceneId: z.string(), nodeId: z.number().int().min(0), parentId: z.number().int().min(0).optional() }).strict() }, async ({ sceneId, nodeId, parentId }) => {
+    const scene = get(sceneId); reparentSceneObject(scene, nodeId, parentId);
+    commit(scene, sceneId); return text({ sceneId, nodeId, parentId: parentId ?? null });
+  });
+  register({ name: "remove_scene_object", description: "Remove a node from all parent groups and prune only descendants not referenced outside its subtree. Shared descendants and model geometry are retained. A required transform child cannot be removed directly: remove the owning transform instead. Undoable.", inputSchema: z.object({ sceneId: z.string(), nodeId: z.number().int().min(0) }).strict() }, async ({ sceneId, nodeId }) => {
+    const scene = get(sceneId), result = removeSceneObject(scene, nodeId);
+    commit(scene, sceneId); return text({ sceneId, ...result });
+  });
+  register({ name: "duplicate_scene_object", description: "Duplicate a node and its reachable subtree with fresh node ids, preserving shared descendants within the copy and existing model references. Optional parentId attaches the copy to a group; omitted creates a root. Undoable.", inputSchema: z.object({ sceneId: z.string(), nodeId: z.number().int().min(0), parentId: z.number().int().min(0).optional() }).strict() }, async ({ sceneId, nodeId, parentId }) => {
+    preflightSceneDuplicate(peek(sceneId), nodeId, parentId, editCapacity(sceneId));
+    const scene = get(sceneId), result = duplicateSceneObject(scene, nodeId, parentId);
+    commit(scene, sceneId); return text({ sceneId, ...result });
+  });
+  register({ name: "add_scene_object", description: "Copy a registry model into a new transform/shape object, matching the scene palette or remapping nearest. Optional parentId must name a group; omitted means a new root. Translation is local; layerId defaults to no layer (-1). Undoable.", inputSchema: z.object({ sceneId: z.string(), id: z.string(), parentId: z.number().int().min(0).optional(), layerId: z.number().int().min(-1).default(-1), translation: z.tuple([z.number().int(), z.number().int(), z.number().int()]).default([0, 0, 0]), remap: z.enum(["error", "nearest"]).default("error") }).strict() }, async ({ sceneId, id, ...options }) => {
+    preflightSceneAddition(peek(sceneId), registry.get(id), editCapacity(sceneId), options.parentId);
+    const scene = get(sceneId), result = addSceneObject(scene, registry.get(id), options);
+    commit(scene, sceneId); return text({ sceneId, ...result });
+  });
+  register({ name: "create_scene", description: "Create a scene with named objects and a default layer from models sharing a palette. Starts independent empty undo/redo history; creation itself is not undoable", inputSchema: z.object({ modelIds: z.array(z.string()).min(1).max(64) }).strict() }, async ({ modelIds }) => {
+    newSceneCapacity();
+    const models = modelIds.map(id => registry.get(id));
+    preflightSceneModels(models);
+    // Construct only the small graph using registry references. No geometry is copied or encoded yet.
+    const scene: VoxScene = { document: { version: 150, main: { id: "MAIN", content: Buffer.alloc(0), children: [] } }, models, nodes: [], layers: [], materials: [], render: { objects: [], cameras: [] } };
     scene.layers.push({ id: 0, attributes: { _name: "Default" } });
     scene.nodes.push({ type: "nTRN", id: 0, attributes: { _name: "Scene" }, childId: 1, layerId: -1, frames: [{ _t: "0 0 0" }] });
     scene.nodes.push({ type: "nGRP", id: 1, attributes: {}, children: [] });
@@ -61,30 +141,46 @@ export function registerSceneTools(register: RegisterTool, registry: ModelRegist
       scene.nodes.push({ type: "nSHP", id: nodeId + 1, attributes: {}, models: [{ modelId: i, attributes: {} }] });
       x += scene.models[i]!.sizeX + 4;
     });
+    newSceneCapacity(scene);
+    const copied = createVOXScene(models);
+    scene.models = copied.models;
     return text({ sceneId: commit(scene) });
   });
-  register({ name: "load_scene", description: "Load a complete VOX scene, preserving unknown chunks and metadata. Strict by default; lenient mode returns warnings for recovered problems", inputSchema: z.object({ path: z.string(), lenient: lenientFlag }).strict() }, async ({ path, lenient }) => {
+  register({ name: "load_scene", description: "Load a complete VOX scene, preserving unknown chunks and metadata. Starts independent empty undo/redo history; loading is not undoable. Strict by default; lenient mode returns warnings for recovered problems", inputSchema: z.object({ path: z.string(), lenient: lenientFlag }).strict() }, async ({ path, lenient }) => {
+    newSceneCapacity();
     const warnings: string[] = [];
-    const scene = decodeVOXScene(fs.readFileSync(path), { lenient, warnings });
+    // The decoder bounds file structures; refuse oversized input before retaining its buffer.
+    if (fs.statSync(path).size > SCENE_INPUT_BYTES) throw new Error("Scene input allocation budget exceeded");
+    const input = fs.readFileSync(path);
+    preflightSceneFile(input, lenient);
+    const scene = decodeVOXScene(input, { lenient, warnings });
+    newSceneCapacity(scene);
     return text({ sceneId: commit(scene), ...(warnings.length ? { warnings } : {}) });
   });
-  register({ name: "load_vox_models", description: "Load every model of a (multi-model or animated) .vox file into the model registry and open the file as a scene; returns one registry id per scene model. Transforms are stored in the scene, not baked", inputSchema: z.object({ path: z.string(), lenient: lenientFlag }).strict() }, async ({ path, lenient }) => {
+  register({ name: "load_vox_models", description: "Load every model of a (multi-model or animated) .vox file into the model registry and open the file as a scene; returns one registry id per scene model. Transforms are stored in the scene, not baked. The newly opened scene starts independent empty undo/redo history; scene undo does not remove imported registry models", inputSchema: z.object({ path: z.string(), lenient: lenientFlag }).strict() }, async ({ path, lenient }) => registry.transaction(async () => {
+    newSceneCapacity();
     const warnings: string[] = [];
-    const scene = decodeVOXScene(fs.readFileSync(path), { lenient, warnings });
+    // The decoder bounds file structures; refuse oversized input before retaining its buffer.
+    if (fs.statSync(path).size > SCENE_INPUT_BYTES) throw new Error("Scene input allocation budget exceeded");
+    const input = fs.readFileSync(path);
+    preflightSceneFile(input, lenient);
+    const scene = decodeVOXScene(input, { lenient, warnings });
+    newSceneCapacity(scene);
+    preflightSceneModels(scene.models);
     const models = scene.models.map((model, modelIndex) => {
       const { id } = registry.create(model.sizeX, model.sizeY, model.sizeZ);
       registry.set(id, model);
       return { modelIndex, id, size: [model.sizeX, model.sizeY, model.sizeZ], voxelCount: model.voxels.length };
     });
     return text({ sceneId: commit(scene), models, ...(warnings.length ? { warnings } : {}) });
-  });
+  }));
   register({ name: "save_scene", description: "Save a complete VOX scene without discarding unknown chunks", inputSchema: z.object({ sceneId: z.string(), path: z.string() }).strict() }, async ({ sceneId, path }) => {
     fs.writeFileSync(path, serialized(entry(sceneId)));
     return text({ sceneId, path });
   });
   register({ name: "list_scenes", description: "List scene identifiers and model counts in this session", inputSchema: z.object({}).strict() }, async () => text([...scenes].map(([sceneId, e]) => ({ sceneId, models: e.scene.models.length, bytes: serialized(e).length }))));
   register({ name: "get_scene_info", description: "Inspect scene models, transform/group/shape nodes, layers, materials and render settings", inputSchema: z.object({ sceneId: z.string() }).strict() }, async ({ sceneId }) => text(listScene(peek(sceneId))));
-  register({ name: "delete_scene", description: "Remove a scene from this session (not undoable)", inputSchema: z.object({ sceneId: z.string() }).strict() }, async ({ sceneId }) => {
+  register({ name: "delete_scene", description: "Remove a scene and discard all its undo/redo history permanently from this session (not undoable)", inputSchema: z.object({ sceneId: z.string() }).strict() }, async ({ sceneId }) => {
     entry(sceneId); scenes.delete(sceneId); return text({ deleted: sceneId });
   });
   register({ name: "extract_scene_model", description: "Copy one scene model into the editable model registry. With bake the model is rotated and positioned by its scene transform (orientations are the 24 right-angle rotations) and the world position of its minimum corner is returned as origin; the pivot rule is unverified against the application", inputSchema: z.object({ sceneId: z.string(), modelIndex: z.number().int().min(0), bake: z.boolean().default(false), instance: z.number().int().min(0).default(0).describe("Which placement to bake when the model is used several times (document order)") }).strict() }, async ({ sceneId, modelIndex, bake, instance }) => registry.transaction(async () => {
@@ -106,8 +202,13 @@ export function registerSceneTools(register: RegisterTool, registry: ModelRegist
     return text({ models, instances: result.instances, skippedHidden: result.skippedHidden });
   }));
   register({ name: "replace_scene_model", description: "Replace scene geometry from an editable model while retaining scene nodes and metadata. A model without a palette is read with the default palette; if its palette differs from the scene palette the call fails (naming the first differing index and both colors) unless remap is 'nearest'", inputSchema: z.object({ sceneId: z.string(), modelIndex: z.number().int().min(0), id: z.string(), remap: z.enum(["error", "nearest"]).default("error") }).strict() }, async ({ sceneId, modelIndex, id, remap }) => {
+    const stored = peek(sceneId), source = registry.get(id);
+    index(stored, modelIndex);
+    preflightSceneModels([source], Math.max(0, Math.min(limits.maxStorageBytes, SCENE_TRANSIENT_BYTES) - sceneStorageBytes(stored)));
+    const projected = [...stored.models]; projected[modelIndex] = source;
+    sceneStorageBytes({ ...stored, models: projected }, editCapacity(sceneId));
     const scene = get(sceneId); index(scene, modelIndex);
-    let incoming = cloneModel(registry.get(id));
+    let incoming = cloneModel(source);
     const others = scene.models.filter((_, i) => i !== modelIndex);
     if (others.length) {
       const reference = scenePalette({ ...scene, models: others });

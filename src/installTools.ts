@@ -9,11 +9,13 @@ import { readConfigFile } from "./magicaConfigFile.js";
 import { decodeVOXScene } from "./scene.js";
 import { loadVOX } from "./vox.js";
 import type { ModelRegistry } from "./model.js";
+import { paletteFromPng } from "./paletteFormats.js";
+import { remapModelToPalette } from "./paletteRemap.js";
 
 type RegisterTool = <T extends z.ZodRawShape>(definition: { name: string; description: string; inputSchema: z.ZodObject<T> }, handler: (args: z.infer<z.ZodObject<T>>) => Promise<CallToolResult>) => void;
 
 /** Tools that never change state; the shared registration wrapper marks exactly these as read-only. */
-export const INSTALL_READ_ONLY_TOOLS = ["get_magicavoxel_info", "list_magicavoxel_samples", "list_magicavoxel_palettes", "list_magicavoxel_shaders", "list_magicavoxel_ibl"];
+export const INSTALL_READ_ONLY_TOOLS = ["get_magicavoxel_info", "list_magicavoxel_samples", "list_magicavoxel_palettes", "list_magicavoxel_shaders", "list_magicavoxel_ibl", "load_magicavoxel_palette"];
 
 const json = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value) }] });
 const SAMPLE_NAME = /^[A-Za-z0-9][A-Za-z0-9 _.\-]*(?:\/[A-Za-z0-9][A-Za-z0-9 _.\-]*)?$/;
@@ -79,6 +81,14 @@ export function registerInstallTools(options: { server: McpServer; register: Reg
     return entries.map(e => describeSample(e, files.maxInputBytes));
   };
   const palettes = () => listFiles(need().dirs.palette, ".png").map(e => ({ ...e, ...pngSize(e.file) }));
+  const readPalette = (name: string) => {
+    const i = need();
+    if (!/^[A-Za-z0-9][A-Za-z0-9 _.\-]*$/.test(name)) throw new Error("Invalid palette name; use a name from list_magicavoxel_palettes");
+    const found = listFiles(i.dirs.palette, ".png").find(e => e.name.toLowerCase() === name.toLowerCase());
+    if (!found) throw new Error(`Palette not found: ${name}. Use a name from list_magicavoxel_palettes`);
+    const palette = paletteFromPng(fs.readFileSync(files.resolve(found.file, "read")));
+    return { name: found.name, palette };
+  };
   const shaders = () => listFiles(need().dirs.shader, ".txt");
   const ibl = () => listFiles(need().dirs.ibl, ".hdr");
   const info = () => {
@@ -100,6 +110,24 @@ export function registerInstallTools(options: { server: McpServer; register: Reg
   register({ name: "list_magicavoxel_palettes", description: "List the palette images shipped with MagicaVoxel with their pixel size. Read-only", inputSchema: empty }, async () => json(palettes().map(({ file: _file, ...rest }) => rest)));
   register({ name: "list_magicavoxel_shaders", description: "List the xs shader scripts shipped with MagicaVoxel. Read-only", inputSchema: empty }, async () => json(shaders().map(({ file: _file, ...rest }) => rest)));
   register({ name: "list_magicavoxel_ibl", description: "List the environment (HDR) images shipped with MagicaVoxel. Read-only", inputSchema: empty }, async () => json(ibl().map(({ file: _file, ...rest }) => rest)));
+  register({
+    name: "load_magicavoxel_palette",
+    description: "Read an explicitly selected installed PNG palette by its listed name, without changing models. Returns 256 unsigned 0xAABBGGRR colors indexed by voxel index: PNG slot 0 maps to index 1, slot 255 to reserved index 0",
+    inputSchema: z.object({ name: z.string().min(1).max(128) }).strict()
+  }, async ({ name }) => {
+    const loaded = readPalette(name);
+    return json({ name: loaded.name, palette: Array.from(loaded.palette) });
+  });
+  register({
+    name: "apply_magicavoxel_palette",
+    description: "Apply an explicitly selected installed PNG palette to a model. Required mode: recolor keeps voxel indices and replaces their colors; nearest remaps to closest RGB colors among indices 1..255 (ties choose lowest index; alpha ignored). Never writes to the installation",
+    inputSchema: z.object({ id: z.string().min(1), name: z.string().min(1).max(128), mode: z.enum(["recolor", "nearest"]) }).strict()
+  }, async ({ id, name, mode }) => {
+    const model = registry.get(id);
+    const loaded = readPalette(name);
+    registry.set(id, mode === "nearest" ? remapModelToPalette(model, loaded.palette) : { ...model, palette: loaded.palette });
+    return json({ id, name: loaded.name, mode });
+  });
   register({
     name: "load_magicavoxel_sample",
     description: "Load a single-model MagicaVoxel sample by its listed name (for example cube or anim/name) into the model registry and return the model id",

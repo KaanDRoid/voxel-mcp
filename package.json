@@ -1,13 +1,29 @@
 {
   "name": "magicvoxel-mcp",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Local MCP server for voxel modeling, MagicaVoxel scenes, previews, and asset conversion.",
   "main": "dist/index.js",
-  "bin": { "magicvoxel-mcp": "dist/index.js" },
-  "files": ["dist", "client-config", "docs", "README.md", "CHANGELOG.md", "LICENSE"],
-  "engines": { "node": ">=22.2" },
-  "repository": { "type": "git", "url": "git+https://github.com/KaanDRoid/voxel-mcp.git" },
-  "bugs": { "url": "https://github.com/KaanDRoid/voxel-mcp/issues" },
+  "bin": {
+    "magicvoxel-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "client-config",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KaanDRoid/voxel-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KaanDRoid/voxel-mcp/issues"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc -p tsconfig.test.json",
@@ -17,7 +33,12 @@
     "check": "npm run typecheck && npm test && npm audit",
     "prepack": "npm run build"
   },
-  "keywords": ["mcp", "magicavoxel", "voxel", "model-context-protocol"],
+  "keywords": [
+    "mcp",
+    "magicavoxel",
+    "voxel",
+    "model-context-protocol"
+  ],
   "author": "KaanDRoid",
   "license": "ISC",
   "type": "module",

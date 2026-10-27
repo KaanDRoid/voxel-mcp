@@ -8,7 +8,7 @@ import { PNG } from 'pngjs';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createVOXScene, saveVOXScene } from '../src/scene.js';
-import { saveVOX } from '../src/vox.js';
+import { saveVOX, loadVOX } from '../src/vox.js';
 import { makeFakeInstall } from './helpers/fakeInstall.js';
 
 const entry = fileURLToPath(new URL('../dist/index.js', import.meta.url));
@@ -33,6 +33,7 @@ function populate(root: string) {
   fs.writeFileSync(path.join(root, 'vox', 'broken.vox'), 'not a vox file');
   fs.writeFileSync(path.join(root, 'vox', 'notes.txt'), 'ignored');
   const png = new PNG({ width: 256, height: 1 });
+  for (let slot = 0; slot < 256; slot++) png.data.set([slot, 80, 20, 255], slot * 4);
   fs.writeFileSync(path.join(root, 'palette', 'pal0.png'), PNG.sync.write(png));
 }
 
@@ -93,6 +94,21 @@ test('discovery tools list the installation contents and load samples by name', 
 
       const loaded = await json('load_magicavoxel_sample', { name: 'cube' });
       assert.equal((await json('get_model_info', { id: loaded.id })).voxelCount, 1);
+      assert.equal(tools.find(t => t.name === 'load_magicavoxel_palette')?.annotations?.readOnlyHint, true);
+      assert.equal(tools.find(t => t.name === 'apply_magicavoxel_palette')?.annotations?.readOnlyHint, false);
+      const selected = await json('load_magicavoxel_palette', { name: 'pal0' });
+      assert.equal(selected.palette.length, 256);
+      assert.equal(selected.palette[1], 0xff145000);
+      await json('apply_magicavoxel_palette', { id: loaded.id, name: 'pal0', mode: 'recolor' });
+      assert.ok(!(await call('save_vox', { id: loaded.id, path: 'recolored.vox' })).isError);
+      assert.equal(loadVOX(path.join(workspace, 'recolored.vox')).palette![5], selected.palette[5]);
+      await json('apply_magicavoxel_palette', { id: loaded.id, name: 'pal0', mode: 'nearest' });
+      const undone = await json('undo');
+      assert.equal(undone.changed, true);
+      for (const bad of ['../pal0', 'pal0.png', 'missing']) {
+        assert.equal((await call('load_magicavoxel_palette', { name: bad })).isError, true);
+      }
+
       assert.equal((await call('load_magicavoxel_sample', { name: 'multi' })).isError, true);
       for (const bad of ['nope', '../config/config', 'cube.vox/../..', 'C:/x', '']) assert.equal((await call('load_magicavoxel_sample', { name: bad })).isError, true, bad);
 
