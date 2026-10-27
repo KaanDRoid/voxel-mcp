@@ -18,12 +18,14 @@ import fs from "fs";
 import { PNG } from "pngjs";
 import { FilePolicy } from "./files.js";
 import { registerSceneTools } from "./sceneTools.js";
-import { INSTALL_READ_ONLY_TOOLS, registerInstallTools } from "./installTools.js";
+import { registerInstallTools } from "./installTools.js";
 import { openVoxFile } from "./openApp.js";
-import { FORMAT_READ_ONLY, registerFormatTools } from "./formatTools.js";
+import { registerFormatTools } from "./formatTools.js";
 import { registerAppControlTools } from "./appControl.js";
+import { runWithRequestSignal, throwIfRequestAborted } from "./requestContext.js";
+import { resolveToolPolicy, selectedToolsets, shouldRegisterTool, enrichToolResult } from "./toolPolicy.js";
 
-import { registerXsTools, XS_READ_ONLY_TOOLS } from "./xsTools.js";
+import { registerXsTools } from "./xsTools.js";
 
 
 // Clipboard for copy/paste operations
@@ -33,19 +35,23 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   const clipboard: { voxels: { x: number; y: number; z: number; i: number }[] } = { voxels: [] };
   const files = new FilePolicy();
   let pending: Promise<unknown> = Promise.resolve();
-  const readOnly = new Set(["list_models", "get_model_info", "measure_distance", "get_surface_area", "get_volume", "find_center", "get_dimensions", "count_colors", "detect_symmetry", "render_model", "copy_region", "list_scenes", "get_scene_info", ...INSTALL_READ_ONLY_TOOLS]);
-  for (const name of FORMAT_READ_ONLY) readOnly.add(name);
-
-  for (const name of XS_READ_ONLY_TOOLS) readOnly.add(name);
+  const selection = selectedToolsets(process.env);
 
   function registerTool<T extends z.ZodRawShape>(definition: { name: string; description: string; inputSchema: z.ZodObject<T> }, handler: (args: z.infer<z.ZodObject<T>>) => Promise<CallToolResult>) {
     const { name, ...schema } = definition;
-    server.registerTool(name, { ...schema, annotations: { readOnlyHint: readOnly.has(name), destructiveHint: !readOnly.has(name), openWorldHint: name === "open_in_magicavoxel" } }, async args => {
+    const policy = resolveToolPolicy(name);
+    if (!shouldRegisterTool(name, selection)) return;
+    server.registerTool(name, { ...schema,
+      annotations: { readOnlyHint: policy.readOnly, destructiveHint: !policy.readOnly, openWorldHint: policy.effects.some(effect => effect === "app-launch" || effect === "app-input") },
+      _meta: { "magicvoxel/toolset": policy.toolset, "magicvoxel/effects": policy.effects, ...(policy.pathFields ? { "magicvoxel/pathFields": policy.pathFields } : {}) },
+    }, async (args, context) => {
       const execute = async (): Promise<CallToolResult> => {
         try {
+          throwIfRequestAborted();
           const parameters = { ...args } as Record<string, unknown>;
           const limits: Record<string, number> = { sizeX: 256, sizeY: 256, sizeZ: 256, r: 256, majorR: 256, minorR: 256, height: 256, thickness: 256, amount: 256, floors: 32, iterations: 16, steps: 60, octaves: 8, fps: 120, durationMs: 600000 };
           for (const [key, value] of Object.entries(parameters)) {
+            throwIfRequestAborted();
             if (typeof value === "number" && (!Number.isFinite(value) || (limits[key] !== undefined && value > limits[key]!))) throw new Error(`${key} exceeds the supported limit`);
             if (typeof value === "string" && value.length > (key === "source" ? 256 * 1024 : 4096)) throw new Error(`${key} exceeds the string limit`);
             if (Array.isArray(value) && value.length > 262144) throw new Error(`${key} exceeds the array limit`);
@@ -56,15 +62,21 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
               if (key === "folder" && fs.readdirSync(parameters[key] as string).some(f => fs.lstatSync(path.join(parameters[key] as string, f)).isSymbolicLink())) throw new Error("Output directory contains symbolic links");
             }
           }
-          const modelMutation = !readOnly.has(name) && !/^(export_|save_|write_)/.test(name) && !name.includes("scene") && !name.includes("animation") && !["undo", "redo", "open_in_magicavoxel", "attach_magicavoxel_app", "set_app_camera", "add_frame", "set_frame_duration", "duplicate_frame", "remove_frame", "reorder_frame", "interpolate_frames"].includes(name);
-          return modelMutation
-            ? await registry.transaction(() => handler(parameters as z.infer<z.ZodObject<T>>))
-            : await handler(parameters as z.infer<z.ZodObject<T>>);
+          const modelMutation = policy.effects.includes("model-mutation") && !name.includes("scene") && !["undo", "redo", "load_vox_models"].includes(name);
+          const invoke = async () => {
+            throwIfRequestAborted();
+            const result = await handler(parameters as z.infer<z.ZodObject<T>>);
+            throwIfRequestAborted();
+            return enrichToolResult(result);
+          };
+          return modelMutation ? await registry.transaction(invoke) : await invoke();
         } catch (error) {
           return { isError: true, content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }] };
         }
       };
-      const result = pending.then(execute, execute);
+      // Keep ownership until the handler (including termination/rollback) actually settles.
+      const inContext = () => runWithRequestSignal(context.mcpReq.signal, execute);
+      const result = pending.then(inContext, inContext);
       pending = result.then(() => undefined, () => undefined);
       return result;
     });
@@ -72,7 +84,8 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   registerTool({ name: "undo", description: "Undo the last model-registry edit (not file writes, scenes or animation edits)", inputSchema: z.object({}).strict() }, async () => ({ content: [{ type: "text", text: JSON.stringify({ changed: registry.undo() }) }] }));
   registerTool({ name: "redo", description: "Redo the last undone model-registry edit", inputSchema: z.object({}).strict() }, async () => ({ content: [{ type: "text", text: JSON.stringify({ changed: registry.redo() }) }] }));
 
-  registerSceneTools(registerTool, registry);
+  const anims = new AnimationRegistry();
+  registerSceneTools(registerTool, registry, {}, anims);
   registerXsTools(registerTool, registry, config, files);
 
   // create_model
@@ -1149,7 +1162,6 @@ export function createTools(server: McpServer, registry: ModelRegistry, config: 
   // Importers
 
   // Animation
-  const anims = new AnimationRegistry();
   registerFormatTools(registerTool, registry, files, anims);
   registerTool(
     { name: "create_animation", description: "Create a new empty animation", inputSchema: z.object({}).strict() },

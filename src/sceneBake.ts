@@ -1,6 +1,6 @@
-import { applyRotation, composeRotations, IDENTITY_ROTATION } from './rotation.js';
+import { applyRotation, composeRotations, IDENTITY_ROTATION, isValidRotation } from './rotation.js';
 import type { Vec3 } from './rotation.js';
-import { parseTranslation, scenePalette } from './scene.js';
+import { indexScene, parseTranslation, scenePalette } from './scene.js';
 import type { SceneNode, VoxScene } from './scene.js';
 import type { VoxModelData, Voxel } from './vox.js';
 
@@ -22,40 +22,138 @@ export interface Instance {
 export interface BakeOptions {
   /** Include instances on hidden layers or with `_hidden` set (default false). */
   includeHidden?: boolean;
-  /** Animation frame used to pick a transform frame and a shape model (default 0). */
+  /** Timeline frame (default 0): hold-last key, earliest before first; missing `_f` uses position. No interpolation. */
   frame?: number;
 }
 export interface BakedPart { model: VoxModelData; /** World coordinates of the model's minimum corner. */ origin: Vec3 }
 export interface FlattenResult { parts: BakedPart[]; instances: number; skippedHidden: number }
 
 export const MAX_BAKE_VOXELS = 8_000_000;
+/** Includes hidden instances, and models in graphless scenes. Checked before instance allocation. */
+export const MAX_BAKE_INSTANCES = 10_000;
+/** Expanded node visits across all roots; also bounds input nodes and edges during preflight. */
+export const MAX_BAKE_VISITS = 100_000;
+/** Maximum number of nodes on any root-to-leaf path, including groups. */
+export const MAX_BAKE_DEPTH = 256;
 const MAX_SPAN = 1 << 16;
+
+/**
+ * Baker policy, not a native playback claim: hold the last key at or before the requested
+ * timeline frame; before the first key, use the earliest key. Missing `_f` uses entry position.
+ * Tracks may be unsorted; entries are complete states, not interpolated or attribute-merged.
+ */
+function timelineEntry<T>(entries: T[], attributes: (entry: T) => { _f?: string }, frame: number): T {
+  if (entries.length < 1 || entries.length > 512) throw new Error('Track requires 1..512 keyframes');
+  const seen = new Set<number>();
+  let earliest: T | undefined, selected: T | undefined;
+  let earliestFrame = Infinity, selectedFrame = -1;
+  entries.forEach((entry, index) => {
+    const raw = attributes(entry)._f;
+    if (raw !== undefined && !/^\d+$/.test(raw)) throw new Error('Invalid native frame index');
+    const key = raw === undefined ? index : Number(raw);
+    if (!Number.isInteger(key) || key < 0 || key > 1_000_000 || seen.has(key)) throw new Error('Invalid or duplicate native frame index');
+    seen.add(key);
+    if (key < earliestFrame) { earliestFrame = key; earliest = entry; }
+    if (key <= frame && key > selectedFrame) { selectedFrame = key; selected = entry; }
+  });
+  return (selected ?? earliest)!;
+}
+
+const childIds = (node: SceneNode): number[] => node.type === 'nTRN' ? [node.childId] : node.type === 'nGRP' ? node.children : [];
+
+/**
+ * Linear-size topological preflight, before any expanded paths or instances are allocated.
+ * Memoized subtree costs count shared children once per incoming edge (not once per node).
+ * This rejects exponential DAGs, including empty subgraphs, without walking their expansion.
+ */
+function bakeRoots(scene: VoxScene, byId: Map<number, SceneNode>): number[] {
+  const incoming = new Map(scene.nodes.map(n => [n.id, 0]));
+  let edges = 0;
+  for (const node of scene.nodes) {
+    const children = childIds(node);
+    edges += children.length;
+    if (edges > MAX_BAKE_VISITS) throw new Error(`Scene traversal visit limit exceeded (${MAX_BAKE_VISITS})`);
+    for (const id of children) {
+      if (!byId.has(id)) throw new Error('Missing scene node reference');
+      incoming.set(id, incoming.get(id)! + 1);
+    }
+  }
+  const roots = scene.nodes.filter(n => incoming.get(n.id) === 0).map(n => n.id);
+  const ordered = [...roots];
+  for (let i = 0; i < ordered.length; i++) {
+    for (const id of childIds(byId.get(ordered[i]!)!)) {
+      const count = incoming.get(id)! - 1;
+      incoming.set(id, count);
+      if (count === 0) ordered.push(id);
+    }
+  }
+  if (ordered.length !== scene.nodes.length) throw new Error('Cyclic scene graph');
+  const costs = new Map<number, { visits: number; instances: number; depth: number }>();
+  const check = (visits: number, instances: number, depth: number): void => {
+    if (instances > MAX_BAKE_INSTANCES) throw new Error(`Scene instance limit exceeded (${MAX_BAKE_INSTANCES})`);
+    if (visits > MAX_BAKE_VISITS) throw new Error(`Scene traversal visit limit exceeded (${MAX_BAKE_VISITS})`);
+    if (depth > MAX_BAKE_DEPTH) throw new Error(`Scene graph depth limit exceeded (${MAX_BAKE_DEPTH})`);
+  };
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    const node = byId.get(ordered[i]!)!;
+    let visits = 1, instances = node.type === 'nSHP' ? 1 : 0, depth = 1;
+    for (const id of childIds(node)) {
+      const child = costs.get(id)!;
+      visits += child.visits; instances += child.instances; depth = Math.max(depth, child.depth + 1);
+      check(visits, instances, depth);
+    }
+    costs.set(node.id, { visits, instances, depth });
+  }
+  let visits = 0, instances = 0;
+  for (const id of roots) {
+    const cost = costs.get(id)!;
+    visits += cost.visits; instances += cost.instances;
+    check(visits, instances, cost.depth);
+  }
+  return roots;
+}
 
 export function collectInstances(scene: VoxScene, options: BakeOptions = {}): Instance[] {
   const frame = options.frame ?? 0;
   if (!Number.isInteger(frame) || frame < 0) throw new Error('frame must be a non-negative integer');
-  if (!scene.nodes.length) return scene.models.map((_, modelId) => ({ modelId, rotation: IDENTITY_ROTATION, translation: [0, 0, 0] as Vec3, path: [], hidden: false }));
-  const byId = new Map<number, SceneNode>(scene.nodes.map(n => [n.id, n]));
-  const layers = new Map(scene.layers.map(l => [l.id, l]));
-  const referenced = new Set<number>();
-  for (const n of scene.nodes) { if (n.type === 'nTRN') referenced.add(n.childId); else if (n.type === 'nGRP') n.children.forEach(c => referenced.add(c)); }
+  if (!scene.nodes.length) {
+    if (scene.models.length > MAX_BAKE_INSTANCES) throw new Error(`Scene instance limit exceeded (${MAX_BAKE_INSTANCES})`);
+    return scene.models.map((_, modelId) => ({ modelId, rotation: IDENTITY_ROTATION, translation: [0, 0, 0] as Vec3, path: [], hidden: false }));
+  }
+  if (scene.nodes.length > MAX_BAKE_VISITS) throw new Error(`Scene traversal visit limit exceeded (${MAX_BAKE_VISITS})`);
+  const { nodes: byId, layers } = indexScene(scene);
+  const roots = bakeRoots(scene, byId);
+  const transforms = new Map<number, { rotation: number; translation: Vec3 }>();
+  const shapes = new Map<number, number>();
+  for (const node of scene.nodes) {
+    if (node.type === 'nTRN') {
+      const selected = timelineEntry(node.frames, f => f, frame);
+      if (node.layerId !== -1 && !layers.has(node.layerId)) throw new Error('Missing scene layer reference');
+      for (const f of node.frames) {
+        if (f._r !== undefined && !isValidRotation(Number(f._r))) throw new Error('Invalid packed rotation');
+        if (f._t !== undefined) parseTranslation(f._t);
+      }
+      transforms.set(node.id, { rotation: selected._r === undefined ? IDENTITY_ROTATION : Number(selected._r), translation: selected._t === undefined ? [0, 0, 0] : parseTranslation(selected._t) });
+    } else if (node.type === 'nSHP') {
+      const selected = timelineEntry(node.models, m => m.attributes, frame);
+      for (const m of node.models) if (!Number.isInteger(m.modelId) || m.modelId < 0 || !scene.models[m.modelId]) throw new Error('Missing scene model reference');
+      shapes.set(node.id, selected.modelId);
+    }
+  }
   const out: Instance[] = [];
   const visit = (id: number, rotation: number, translation: Vec3, path: number[], hidden: boolean): void => {
     const node = byId.get(id); if (!node) throw new Error('Missing scene node reference');
     if (node.type === 'nTRN') {
-      const f = node.frames[Math.min(frame, node.frames.length - 1)]!;
-      const r = f._r === undefined ? IDENTITY_ROTATION : Number(f._r);
-      const t = f._t === undefined ? [0, 0, 0] as Vec3 : parseTranslation(f._t);
+      const { rotation: r, translation: t } = transforms.get(id)!;
       const rotated = applyRotation(rotation, t);
       const isHidden = hidden || node.attributes._hidden === '1' || (node.layerId !== -1 && layers.get(node.layerId)?.attributes._hidden === '1');
       visit(node.childId, composeRotations(rotation, r), [translation[0] + rotated[0], translation[1] + rotated[1], translation[2] + rotated[2]], [...path, id], isHidden);
     } else if (node.type === 'nGRP') node.children.forEach(c => visit(c, rotation, translation, path, hidden));
     else {
-      const entry = node.models.find(m => m.attributes._f === String(frame)) ?? node.models[0]!;
-      out.push({ modelId: entry.modelId, rotation, translation, path, hidden });
+      out.push({ modelId: shapes.get(id)!, rotation, translation, path, hidden });
     }
   };
-  for (const n of scene.nodes) if (!referenced.has(n.id)) visit(n.id, IDENTITY_ROTATION, [0, 0, 0], [], false);
+  for (const id of roots) visit(id, IDENTITY_ROTATION, [0, 0, 0], [], false);
   return out;
 }
 

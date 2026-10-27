@@ -7,6 +7,7 @@ import type { FilePolicy } from "./files.js";
 import type { MagicaConfig } from "./magicaConfig.js";
 import { resolveInstall } from "./magicaInstall.js";
 import { inspectPng } from "./png.js";
+import { currentRequestSignal, throwIfRequestAborted, poisonRequestQueue } from "./requestContext.js";
 
 type RegisterTool = <T extends z.ZodRawShape>(definition: { name: string; description: string; inputSchema: z.ZodObject<T> }, handler: (args: z.infer<z.ZodObject<T>>) => Promise<CallToolResult>) => void;
 const text = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value) }] });
@@ -227,25 +228,80 @@ try {
 
 type SpawnFn = typeof spawn;
 
-/** Builds the runner: Windows PowerShell with an encoded command and ASCII-escaped JSON on stdin. No shell, no temp files. */
-export function makeRunner(spawnFn: SpawnFn = spawn): PowerShellRunner {
+/** Builds a shell-free helper runner. An unconfirmed stop permanently disables the shared queue. */
+export function makeRunner(spawnFn: SpawnFn = spawn, options: {
+  terminationGraceMs?: number;
+  /** Test seam; production always uses the permanent process-wide latch. */
+  onUnsafeTermination?: (error: Error) => void;
+} = {}): PowerShellRunner {
+  const grace = options.terminationGraceMs ?? 2000;
+  if (!Number.isInteger(grace) || grace < 2 || grace > 60_000) throw new Error("Invalid helper termination grace period");
+  const unsafe = options.onUnsafeTermination ?? poisonRequestQueue;
   return (script, input, timeoutMs) => new Promise((resolve, reject) => {
+    const signal = currentRequestSignal();
+    throwIfRequestAborted(signal);
     const encoded = Buffer.from(script, "utf16le").toString("base64");
     const child = spawnFn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], { shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     let out = "", err = "", settled = false;
-    const finish = (action: () => void) => { if (settled) return; settled = true; clearTimeout(timer); action(); };
-    const timer = setTimeout(() => { child.kill(); finish(() => reject(new Error("The window automation helper timed out"))); }, timeoutMs);
+    let stopError: Error | undefined, killError: Error | undefined;
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const finish = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(watchdog);
+      clearTimeout(retry);
+      signal?.removeEventListener("abort", abort);
+      action();
+    };
+    const reap = () => {
+      if (settled) return;
+      try { if (!child.kill("SIGKILL")) killError = new Error("Helper termination was refused"); }
+      catch (error) { killError = error instanceof Error ? error : new Error(String(error)); }
+    };
+    const stop = (error: Error) => {
+      if (settled || stopError) return;
+      stopError = error;
+      clearTimeout(timer);
+      // Keep ownership while reaping. If closure remains unknown, disable every tool
+      // before settling: no subsequent operation may run beside a surviving helper.
+      watchdog = setTimeout(() => {
+        const fatal = new Error(`Unsafe automation helper${child.pid ? ` (pid ${child.pid})` : ""}: termination could not be confirmed${killError ? ` (${killError.message})` : ""}. All tools are disabled. Stop the helper and restart the MCP server before retrying.`);
+        unsafe(fatal);
+        finish(() => reject(fatal));
+      }, grace);
+      retry = setTimeout(reap, Math.floor(grace / 2));
+      reap();
+    };
+    const abort = () => stop(new Error("Window automation cancelled; the application may still be rendering and could write the file later"));
+    const timer = setTimeout(() => stop(new Error("The window automation helper timed out")), timeoutMs);
     child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (d: string) => { out += d; if (out.length > 1 << 20) child.kill(); });
-    child.stderr?.on("data", (d: Buffer | string) => { if (err.length < 4096) err += String(d); });
-    child.stdin?.on("error", () => { /* the helper exited early; the close handler reports it */ });
-    child.once("error", (e: Error) => finish(() => reject(e)));
+    child.stdout?.on("data", (d: string) => {
+      // A surviving helper must not grow this buffer after its stop was requested.
+      if (stopError || settled) return;
+      out += d;
+      if (out.length > 1 << 20) stop(new Error("The window automation helper exceeded its output limit"));
+    });
+    child.stderr?.on("data", (d: Buffer | string) => { if (err.length < 4096) err += String(d).slice(0, 4096 - err.length); });
+    child.stdin?.on("error", () => { /* close reports early helper exit */ });
+    child.on("error", (e: Error) => {
+      if (settled) return;
+      if (child.pid === undefined) finish(() => reject(e));
+      else if (stopError) killError = e;
+      else stop(e);
+    });
     child.once("close", () => finish(() => {
-      try { resolve(JSON.parse((out.trim().split(/\r?\n/).at(-1) ?? "").replace(/^\uFEFF/, ""))); }
+      if (stopError) { reject(stopError); return; }
+      try { throwIfRequestAborted(signal); } catch (error) { reject(error); return; }
+      try { resolve(JSON.parse((out.trim().split(String.fromCharCode(10)).at(-1) ?? "").replace(/^\uFEFF/, ""))); }
       catch { reject(new Error(`The window automation helper returned no result${err ? `: ${err.slice(0, 300)}` : ""}`)); }
     }));
+    // Wire error/close listeners before cancellation can synchronously trigger kill errors.
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
     // ASCII only, so no console code page can change the meaning of a path.
-    child.stdin?.end(JSON.stringify(input).replace(/[\u007f-\uffff]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`));
+    if (!stopError) child.stdin?.end(JSON.stringify(input).replace(/[\u007f-\uffff]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`));
   });
 }
 export const runPowerShell: PowerShellRunner = makeRunner();
@@ -290,7 +346,17 @@ export function registerAppControlTools(register: RegisterTool, files: FilePolic
   let pinned: AppIdentity | undefined;
   // One live-input operation at a time, even if a caller bypasses the shared tool queue.
   let lock: Promise<unknown> = Promise.resolve();
-  const exclusive = <T>(fn: () => Promise<T>): Promise<T> => { const result = lock.then(fn, fn); lock = result.then(() => undefined, () => undefined); return result; };
+  const exclusive = <T>(fn: () => Promise<T>): Promise<T> => {
+    const execute = async () => {
+      throwIfRequestAborted();
+      const value = await fn();
+      throwIfRequestAborted();
+      return value;
+    };
+    const result = lock.then(execute, execute);
+    lock = result.then(() => undefined, () => undefined);
+    return result;
+  };
 
   const enabled = () => {
     if (platform !== "win32") throw new Error("Live MagicaVoxel control is only available on Windows");
@@ -308,6 +374,7 @@ export function registerAppControlTools(register: RegisterTool, files: FilePolic
   const execute = async (steps: unknown[], timeoutMs: number): Promise<string[]> => {
     const identity = pin();
     const result = await run(UI_SCRIPT, { mode: "steps", ...identity, scale: uiScale(identity.exe), budgetMs: timeoutMs - 5000, steps }, timeoutMs) as StepResult;
+    throwIfRequestAborted();
     if (!result.ok) throw new Error(result.error ?? "The window automation step failed");
     return result.steps ?? [];
   };
@@ -322,6 +389,7 @@ export function registerAppControlTools(register: RegisterTool, files: FilePolic
     const version = resolveInstall({ MAGICAVOXEL_PATH: wanted }).version;
     if (version !== CALIBRATED_VERSION && env[UI_ANY_VERSION_ENV] !== "1") throw new Error(`Live control is calibrated for MagicaVoxel ${CALIBRATED_VERSION}, found ${version ?? "an unknown version"}. Set ${UI_ANY_VERSION_ENV}=1 to try anyway`);
     const result = await run(UI_SCRIPT, { mode: "list" }, 30000) as StepResult;
+    throwIfRequestAborted();
     if (!result.ok) throw new Error(result.error ?? "Listing processes failed");
     const matches = (result.processes ?? []).filter(p => p.exe && samePath(p.exe, wanted));
     if (!matches.length) throw new Error("No running MagicaVoxel process uses the configured executable. Start it first (open_in_magicavoxel)");
@@ -352,7 +420,7 @@ export function registerAppControlTools(register: RegisterTool, files: FilePolic
 
   register({
     name: "export_native_render",
-    description: "Run the application's own Final Render (Photo) in the attached MagicaVoxel window, which must be in Render mode with the scene open, and save the PNG. Takes over mouse and keyboard while starting. Returns only after the file exists, is stable, is a regular file inside the workspace written by this run, and passes PNG structure and checksum checks at the requested size. Refuses to overwrite",
+    description: "Run the application's own Final Render (Photo) in the attached MagicaVoxel window, which must be in Render mode with the scene open, and save the PNG. Takes over mouse and keyboard while starting. Returns only after the file exists, is stable, is a regular file inside the workspace written by this run, and passes PNG structure and checksum checks at the requested size. Refuses to overwrite. Cancellation stops the automation helper and file polling, not the application's render: it may continue and write the file later",
     inputSchema: z.object({
       path: z.string(),
       // Not named width/height: the shared tool wrapper caps parameters called "height" at the model limit of 256.
@@ -378,13 +446,17 @@ export function registerAppControlTools(register: RegisterTool, files: FilePolic
     const started = now();
     let last = -1, stableSince = started;
     for (;;) {
+      // Cancelling observation does not cancel the native application's render job.
+      throwIfRequestAborted();
       if (now() - started > timeoutSeconds * 1000) throw new Error(`The render did not finish within ${timeoutSeconds} seconds; the application may still be rendering and could write the file later`);
       await sleep(1000);
+      throwIfRequestAborted();
       if (!fs.existsSync(target)) continue;
       const size = fs.statSync(target).size;
       if (size !== last) { last = size; stableSince = now(); continue; }
       if (size > 0 && now() - stableSince >= settle * 1000) break;
     }
+    throwIfRequestAborted();
     const observedStable = (now() - stableSince) / 1000;
     const link = fs.lstatSync(target);
     if (link.isSymbolicLink() || !link.isFile()) throw new Error("The output is not a regular file");

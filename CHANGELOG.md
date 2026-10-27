@@ -5,6 +5,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-27
+
+### Added
+
+- Scene object insertion, subtree duplication/removal, reparenting and explicit layer deletion/reassignment.
+- Independent bounded `undo_scene` and `redo_scene`, covering scene setters, graph edits, model replacement, presets and keyframes.
+- Typed material properties, studio/daylight/night lighting metadata presets and saved-camera poses with numeric validation.
+- Native transform/model keyframe inspection, editing and removal; `animation_to_scene` bridges the frame registry or explicit model IDs, reporting timing quantization and custom metadata limitations.
+- `load_magicavoxel_palette` and `apply_magicavoxel_palette`, with explicit recolor/nearest behavior and installation write protection.
+- `MAGICVOXEL_MCP_TOOLSETS`, per-tool group/effect/path metadata and structured JSON results without removing existing text/image content.
+- Cooperative request cancellation for queued operations, shader workers, automation helpers and native-render polling.
+- Local GitHub installation guidance, scene workflow examples and toolset/cancellation documentation; no npm account is required for local use.
+
+### Fixed
+
+- Scene baking selects sparse/unsorted native frame indices consistently instead of using transform array positions. Shared graph expansion is bounded before traversal.
+- Scene decoding, copies and history account for object-heavy graphs and repeated models before expensive allocation, with independent retained and transient budgets.
+- Multi-model scene imports roll back registry insertions and IDs when capacity is exhausted.
+- Helper stop failures are retried within a bounded grace period; unconfirmed termination permanently disables tool execution with an actionable restart error rather than hanging or allowing unsafe concurrent input.
+- Shader cancellation awaits worker termination before rollback, while cancelled queued calls never prepare output paths or mutate models.
+- Existing Neon Alley demo remains loadable, editable and reproducible within the bounded scene policies.
+
 ## [1.3.0] - 2026-10-26
 
 ### Added

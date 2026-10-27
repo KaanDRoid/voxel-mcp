@@ -9,7 +9,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 ## Features
 
 - **Models and editing**: primitives (box, sphere, cylinder, cone, pyramid, torus, line), explicit voxels, copy/paste, transforms, boolean operations, morphology (erode, dilate, smooth, hollow, outline), patterns, gradients, noise and symmetry tools.
-- **Undo/redo**: `undo` and `redo` cover model edits. A failed edit rolls back automatically. File writes, scenes and animations are not part of undo.
+- **Undo/redo**: `undo` and `redo` cover model edits; `undo_scene` and `redo_scene` cover scene edits with independent bounded per-scene history. Failed edits roll back automatically. File writes and frame-registry animation edits are not undone.
 - **VOX files**: strict reader and writer for version 150/200 files with the official default palette. `load_vox` rejects multi-model files instead of silently dropping data: pass `modelIndex` to load one model, or use `load_vox_models` to load every model of a multi-model or animated file (plus a scene that keeps the transforms). Both tools and `load_scene` accept `lenient: true` to recover from duplicate voxels, invalid UTF-8 and malformed render chunks; recovered problems are returned as `warnings`.
 - **Scenes**: `create_scene`, `load_scene`, `load_vox_models`, `save_scene`, `flatten_scene`, `get_scene_info`, `list_scenes`, `delete_scene`, `extract_scene_model`, `replace_scene_model`, `set_scene_node`, `set_scene_layer`, `set_scene_material`. Transform, group, shape, layer and material records are preserved and unknown chunks are written back unchanged. Render settings (`rOBJ`, `rCAM`, `NOTE`, `IMAP`, `META`) are parsed into typed fields and written back byte-for-byte when unchanged. Scenes require one shared palette (a model without a palette is read with the default palette; `replace_scene_model` reports the first differing index and accepts `remap: "nearest"`). Transforms are stored rather than baked unless you ask: `flatten_scene` merges all visible objects into one world-space model (hidden layers skipped by default, `splitIntoChunks` for results above 256 per axis) and `extract_scene_model` accepts `bake`. Only the 24 right-angle orientations exist in the format. The pivot rule used for baking (offset from cell `floor(size / 2)`) is unverified against the application. Parsed scenes stay in memory, so repeated calls do not re-decode the file.
 
@@ -17,12 +17,14 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 - **Preview**: `render_model` returns a palette-colored PNG (`top`, `front`, `side`, `zmax`, `isometric`) directly to the client.
 - **Generators**: houses, characters, vehicles, furniture, weapons, structures, creatures, nature, terrain, trees, and city/venue helpers. Output is deterministic for a given seed.
 - **Images**: colorized voxelization, silhouettes, depth maps, edge detection and multi-view carving from PNG/JPEG.
-- **Animation**: frame registry, deterministic dissolve between frames, sprite sheets, PNG frame folders, and GIF with per-frame timing and loop setting.
+- **Animation**: frame registry, deterministic dissolve between frames, sprite sheets, PNG frame folders, GIF with per-frame timing and loop setting, native scene transform/model keyframes and `animation_to_scene`. Native keyframes preserve file metadata; playback timing in MagicaVoxel is not guaranteed.
 - **Palettes**: load and save MagicaVoxel palette PNGs (`import_palette_png`, `export_palette_png`), Adobe `.act` and palette-only VOX files; `remap_model_to_palette`, `quantize_model`, `sort_palette`, `find_nearest_color` and `merge_palettes` work in CIE Lab and report the color error.
 - **Export/import**: VOX, OBJ (basic or MagicaVoxel profile with `.mtl` and palette texture), PLY, STL, glTF 2.0 (embedded), PNG slices, Qubicle `.qb`, XRAW, Slab6 VOX, Sponge `.schem` (v2/v3) and legacy Minecraft `.schematic`; OBJ import with solid fill and colors, SVG import with paths, fills and transforms.
 
 - **Live application control (Windows, opt-in)**: `attach_magicavoxel_app`, `set_app_camera` and `export_native_render` drive a running MagicaVoxel window through its own console and Final Render dialog. Disabled unless `MAGICVOXEL_MCP_UI_AUTOMATION=1`; see [Live application control](#live-application-control-windows-opt-in).
 - **xs shaders**: `list_xs_shaders`, `read_xs_shader`, `validate_xs_shader`, `write_xs_shader` (workspace only), `generate_xs_shader_template` and `run_xs_shader`. Shaders are read from the workspace or from the `shader` folder of the MagicaVoxel install (`MAGICAVOXEL_HOME`, or the folder of `MAGICAVOXEL_PATH`); the install folder is never written. `run_xs_shader` uses a built-in sandboxed interpreter for a documented GLSL subset (no code is evaluated by the JavaScript engine) and is undoable. See `docs/xs-shader-evaluation.md`.
+
+See [Scene workflows](docs/scene-workflows.md) for object insertion/duplication/removal/reparenting, layer deletion, scene history, typed materials/lighting/cameras, native keyframes and installed palette workflows.
 
 ## Requirements
 
@@ -32,9 +34,15 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 ## Install
 
 ```bash
+git clone https://github.com/KaanDRoid/voxel-mcp.git
+cd voxel-mcp
 npm ci
 npm run build
 ```
+
+This is a local source installation. An npm account and a published npm package
+are not required. See [client-config](client-config/README.md) for Windows paths
+and troubleshooting.
 
 Point your MCP client at `dist/index.js` (see [client-config](client-config/README.md)):
 
@@ -56,6 +64,7 @@ Point your MCP client at `dist/index.js` (see [client-config](client-config/READ
 |---|---|
 | `MAGICVOXEL_MCP_WORKSPACE` | Directory for all reads and writes. Defaults to the server's working directory. Paths that escape it, including through symlinks, are rejected. |
 | `MAGICAVOXEL_PATH` | Absolute path to `MagicaVoxel.exe` or `MagicaVoxel`, enabling `open_in_magicavoxel` and installation discovery. Takes precedence over `MAGICAVOXEL_HOME`. |
+| `MAGICVOXEL_MCP_TOOLSETS` | Optional comma-separated tool groups: `core`, `modeling`, `scene`, `animation`, `palette`, `formats`, `shaders`, `app`. Core is always included; unset enables all. See [Tool selection](docs/toolsets.md). |
 | `MAGICVOXEL_MCP_UI_AUTOMATION` | Set to `1` to allow the live-application tools, which send real mouse and keyboard input to the MagicaVoxel window (Windows only). Off by default. |
 | `MAGICAVOXEL_HOME` | The MagicaVoxel installation folder (the one containing the executable, `config`, `vox`, `palette`, `shader` and `ibl`). Enables the discovery tools and, when `MAGICAVOXEL_PATH` is unset, `open_in_magicavoxel`. |
 
@@ -101,11 +110,30 @@ What the tools guarantee, and what they do not:
 - Bringing the window to the front visibly interrupts whatever you are doing, and other tools wait while a render runs.
 - Only one live operation runs at a time. Final renders take as long as the application needs.
 
+## Tool selection, structured results and cancellation
+
+Every tool advertises its group and possible effects. Set
+`MAGICVOXEL_MCP_TOOLSETS` to reduce the catalog for your workflow. Successful JSON
+results also include structured data without removing existing text or images.
+Queued requests, active shader workers and native-render waiting support
+cooperative cancellation; synchronous tools cannot be interrupted mid-execution,
+and cancelling the helper does not stop a render already started in MagicaVoxel.
+Forced helper termination may leave a pressed modifier or mouse button down.
+See [Tool selection and result metadata](docs/toolsets.md) for exact limits.
+
 ## Limits
+
+Scene inputs are limited to 16 MiB, with independent estimated allocation budgets:
+64 MiB retained across scenes and history, and 256 MiB for transient work. These
+are conservative accounting units, not measurements of exact JavaScript heap
+usage. Scene history defaults to 16 snapshots/16 MiB per scene; large snapshots
+may be evicted. Native track editing/baking accepts up to 512 keys per track.
+If an automation helper cannot be stopped conclusively, tools are disabled until
+the helper is stopped and the MCP server restarted.
 
 Models are at most 256 voxels per axis (the VOX limit) and 2,000,000 voxels each. The registry holds up to 64 models and 8,000,000 voxels with a bounded undo history. Input files are limited to 64 MiB; images to 32 MiB and about 4.2 million pixels. Oversized or malformed input returns a tool error.
 
-xs shader runs are limited to 200,000 interpreter steps per voxel, 4,096 iterations per loop, shader sources of 64 KiB and a wall-clock limit (default 20 s, at most 120 s). Evaluation runs in a worker thread so it cannot block protocol pings, and timeout leaves the model unchanged. Dense shaders with long loops (for example the shipped Mandelbulb) take about a minute at 128^3 and are best run on smaller volumes.
+xs shader runs are limited to 200,000 interpreter steps per voxel, 4,096 iterations per loop, shader sources of 256 KiB and a wall-clock limit (default 20 s, at most 120 s). Evaluation runs in a worker thread so it cannot block protocol pings, and timeout leaves the model unchanged. Dense shaders with long loops (for example the shipped Mandelbulb) take about a minute at 128^3 and are best run on smaller volumes.
 
 Palette PNG imports require exactly 256 pixels (for example 256x1 or 16x16).
 PNG dimensions and inflated scanline sizes are checked before decoding, including
