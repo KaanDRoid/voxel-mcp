@@ -1,6 +1,6 @@
 {
   "name": "magicvoxel-mcp",
-  "version": "1.5.0",
+  "version": "1.0.0",
   "description": "Local MCP server for voxel modeling, MagicaVoxel scenes, previews, and asset conversion.",
   "main": "dist/index.js",
   "bin": {

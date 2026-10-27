@@ -14,6 +14,8 @@ import { AXIS_PATTERN } from "./formats/axes.js";
 import { decodeQB, encodeQB } from "./formats/qb.js";
 import { decodeXRAW, encodeXRAW } from "./formats/xraw.js";
 import { decodeSlab6, encodeSlab6 } from "./formats/slab6.js";
+import { decodeKVX, encodeKVX } from "./formats/kvx.js";
+import { decodeRaw, encodeRaw } from "./formats/raw.js";
 import { decodeSchem, encodeSchem } from "./formats/schem.js";
 import { paletteFromAct, paletteFromPng, paletteFromVox, paletteToAct, paletteToPng, paletteToVox } from "./paletteFormats.js";
 import { findNearestColors, mergeModelPalettes, quantizeModel, remapModelToPalette, sortModelPalette } from "./paletteOps.js";
@@ -34,11 +36,11 @@ const metric = z.enum(["lab", "rgb"]).optional();
 /** Registers palette file formats, palette operations, mesh/voxel format import and export tools. */
 export function registerFormatTools(register: RegisterTool, registry: ModelRegistry, files: FilePolicy, anims: AnimationRegistry): void {
   const write = (file: string, data: Uint8Array | string) => writeFileNoFollow(file, data);
-  const adopt = (data: VoxModelData, warnings: string[] = []): CallToolResult => {
+  const adopt = (data: VoxModelData, warnings: string[] = [], extra: Record<string, unknown> = {}): CallToolResult => {
     const { id: newId, model } = registry.create(data.sizeX, data.sizeY, data.sizeZ);
     model.voxels = data.voxels;
     if (data.palette) model.palette = data.palette;
-    return text({ id: newId, sizeX: data.sizeX, sizeY: data.sizeY, sizeZ: data.sizeZ, voxels: data.voxels.length, warnings });
+    return text({ ...extra, id: newId, sizeX: data.sizeX, sizeY: data.sizeY, sizeZ: data.sizeZ, voxels: data.voxels.length, warnings });
   };
 
   // ---- palette files -------------------------------------------------------------------------
@@ -101,8 +103,8 @@ export function registerFormatTools(register: RegisterTool, registry: ModelRegis
     description: "Export the model as a Wavefront OBJ. profile 'basic' writes one file with vertex colors; profile 'magica' follows the MagicaVoxel io_obj defaults (scale 0.1, merged faces) and also writes a .mtl and a palette PNG next to the OBJ. Default axis XZ-Y is Y-up; use XYZ for Z-up",
     inputSchema: z.object({ id, path: z.string(), profile: z.enum(["basic", "magica"]).optional(), scale, axis, cw: z.boolean().optional(), merge: z.boolean().optional() }).strict(),
   }, async ({ id: modelId, path, profile, scale: s, axis: a, cw, merge }) => text({ path, ...exportOBJ(registry.get(modelId), path, { profile, scale: s, axis: a, cw, merge }) }));
-  register({ name: "export_ply", description: "Export voxels as an ASCII PLY point cloud with vertex colors (scale and axis as in export_obj)", inputSchema: z.object({ id, path: z.string(), scale, axis }).strict() },
-    async ({ id: modelId, path, scale: s, axis: a }) => { exportPLY(registry.get(modelId), path, { scale: s, axis: a }); return text({ path }); });
+  register({ name: "export_ply", description: "Export ASCII PLY. Default points profile is a voxel point cloud; magica profile is an RGB surface mesh matching native XYZ/scale 0.1/floor-centered XY defaults. Custom axis, scale and winding are explicit overrides.", inputSchema: z.object({ id, path: z.string(), profile: z.enum(["points", "magica"]).optional(), scale, axis, cw: z.boolean().optional(), merge: z.boolean().optional() }).strict() },
+    async ({ id: modelId, path, profile, scale: s, axis: a, cw, merge }) => { exportPLY(registry.get(modelId), path, { profile, scale: s, axis: a, cw, merge }); return text({ path }); });
   register({ name: "export_stl", description: "Export the model surface as ASCII STL; Z-up by default (axis XYZ), optional scale, axis and merged faces", inputSchema: z.object({ id, path: z.string(), scale, axis, merge: z.boolean().optional() }).strict() },
     async ({ id: modelId, path, scale: s, axis: a, merge }) => { exportSTL(registry.get(modelId), path, { scale: s, axis: a, merge }); return text({ path }); });
   register({ name: "export_gltf", description: "Export the model surface as glTF 2.0 with an embedded buffer; Y-up by default (axis XZ-Y), optional scale, axis and merged faces", inputSchema: z.object({ id, path: z.string(), scale, axis, merge: z.boolean().optional() }).strict() },
@@ -140,14 +142,37 @@ export function registerFormatTools(register: RegisterTool, registry: ModelRegis
     async ({ id: modelId, path, compress, colorFormat }) => { write(path, encodeQB(registry.get(modelId), { compress, colorFormat })); return text({ path }); });
   register({ name: "import_qb", description: "Import a Qubicle Binary (.qb) file (all matrices are merged by position) into a new model; more than 255 colors are reduced with a warning", inputSchema: z.object({ path: z.string() }).strict() },
     async ({ path }) => { const r = decodeQB(fs.readFileSync(path)); return adopt(r.model, r.warnings); });
-  register({ name: "export_xraw", description: "Export the model as XRAW (MagicaVoxel RAW export layout: 8-bit palette indices plus RGBA palette; axis mapping unverified)", inputSchema: z.object({ id, path: z.string() }).strict() },
-    async ({ id: modelId, path }) => { write(path, encodeXRAW(registry.get(modelId))); return text({ path }); });
+  register({ name: "export_xraw", description: "Export unsigned RGBA8 XRAW in indexed8 (default) or direct rgba8 mode. Native indexed XRAW axis/color mapping is regression-tested against an asymmetric MagicaVoxel export. Direct RGBA preserves nonzero partial alpha; alpha zero represents empty space.", inputSchema: z.object({ id, path: z.string(), encoding: z.enum(["indexed8", "rgba8"]).optional() }).strict() },
+    async ({ id: modelId, path, encoding }) => { write(path, encodeXRAW(registry.get(modelId), { encoding })); return text({ path }); });
   register({ name: "import_xraw", description: "Import an XRAW file (8-bit palette indices, or direct RGBA voxels) into a new model", inputSchema: z.object({ path: z.string() }).strict() },
     async ({ path }) => { const r = decodeXRAW(fs.readFileSync(path)); return adopt(r.model, r.warnings); });
   register({ name: "export_slab6", description: "Export the model as a Slab6/SLABSPRI VOX file (uncompressed grid, 6-bit palette, Z size at most 255; this is not the MagicaVoxel VOX container)", inputSchema: z.object({ id, path: z.string() }).strict() },
     async ({ id: modelId, path }) => { write(path, encodeSlab6(registry.get(modelId))); return text({ path }); });
   register({ name: "import_slab6", description: "Import a Slab6/SLABSPRI VOX file (uncompressed grid; not the MagicaVoxel VOX container) into a new model", inputSchema: z.object({ path: z.string() }).strict() },
     async ({ path }) => { const r = decodeSlab6(fs.readFileSync(path)); return adopt(r.model, r.warnings); });
+
+  register({ name: "export_kvx", description: "Export Build-engine KVX with one mip, fixed8 pivot, correct six-face slab visibility and 6-bit RGB palette. Writes every occupied cell; alpha and RGB precision are lossy. X/Y unchanged, Z reversed to native down; pivot uses Z-up grid boundary coordinates. A relative x-column offset above 65535 is refused.", inputSchema: z.object({ id, path: z.string(), pivot: z.tuple([z.number(), z.number(), z.number()]).optional() }).strict() }, async ({ id: modelId, path, pivot }) => {
+    const model = registry.get(modelId);
+    write(path, encodeKVX(model, pivot ? { pivot } : undefined));
+    return text({ path, mipLevels: 1, pivot: pivot ?? [model.sizeX / 2, model.sizeY / 2, model.sizeZ / 2], warnings: ["KVX stores 6-bit RGB without alpha"] });
+  });
+  register({ name: "import_kvx", description: "Import validated Build-engine KVX (up to five mips); highest-resolution stored voxels only, without inventing implicit interiors. Returns Z-up boundary pivot and mip count. Six-bit RGB expands; more than 255 used colors are quantized with a warning.", inputSchema: z.object({ path: z.string() }).strict() }, async ({ path }) => {
+    const result = decodeKVX(fs.readFileSync(path));
+    return adopt(result.model, result.warnings, { pivot: result.pivot, mipLevels: result.mipLevels });
+  });
+  const encoding = z.enum(["rgba8", "rgb8", "indexed8"]).default("rgba8");
+  const order = z.enum(["x-fastest", "z-fastest"]).default("x-fastest");
+  const emptyColor = z.number().int().min(0).max(0xffffff).optional();
+  register({ name: "export_raw", description: "Export headerless RGBA8, RGB8 or indexed8 data with explicit dimensions/order returned in metadata. Preserve that metadata for import. RGBA alpha zero is empty; RGB uses a collision-free empty-color sentinel and warns on alpha loss. Indexed output returns its 256-entry palette. No layout guessing.", inputSchema: z.object({ id, path: z.string(), encoding, order, emptyColor }).strict() }, async ({ id: modelId, path, encoding, order, emptyColor }) => {
+    const result = encodeRaw(registry.get(modelId), { encoding, order, ...(emptyColor !== undefined ? { emptyColor } : {}) });
+    write(path, result.data);
+    return text({ path, metadata: result.metadata, warnings: result.warnings });
+  });
+  register({ name: "import_raw", description: "Import headerless RAW only with explicit dimensions, encoding and order. RGB without emptyColor treats every sample as occupied. Indexed zero is empty; palette defaults to the VOX default when omitted. Direct colors preserve RGBA exactly up to 255 unique occupied entries; larger color sets are refused, not silently reduced. Maximum 2 million occupied cells.", inputSchema: z.object({ path: z.string(), sizeX: z.number().int().min(1).max(256), sizeY: z.number().int().min(1).max(256), sizeZ: z.number().int().min(1).max(256), encoding, order, emptyColor, palette: z.array(z.number().int().min(0).max(0xffffffff)).length(256).optional() }).strict() }, async ({ path, sizeX, sizeY, sizeZ, encoding, order, emptyColor, palette }) => {
+    if (palette !== undefined && encoding !== "indexed8") throw new Error("RAW palette applies only to indexed8 data");
+    const result = decodeRaw(fs.readFileSync(path), { sizeX, sizeY, sizeZ, encoding, order, ...(emptyColor !== undefined ? { emptyColor } : {}), ...(palette ? { palette } : {}) });
+    return adopt(result.model, result.warnings);
+  });
 
   const blockEntry = z.object({ block: z.string().max(200), color: hexColor }).strict();
   register({

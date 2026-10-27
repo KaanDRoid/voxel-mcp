@@ -44,7 +44,9 @@ test('scene workflows, presets and registry animation bridge work together over 
     await call('set_scene_camera_pose', { sceneId, cameraId: 0, focus: [0, 0, 0], angle: [-24, -35, 0], radius: 100, fov: 45 });
     await call('set_scene_transform_keyframe', { sceneId, nodeId: added.nodeId, frameIndex: 10, translation: [16, 0, 0] });
     await call('set_scene_model_keyframe', { sceneId, nodeId: added.shapeId, frameIndex: 10, modelIndex: 0 });
+    assert.deepEqual((await call('set_scene_animation_range', { sceneId, start: 0, end: 30 })).range, { start: 0, end: 30 });
     const tracks = await call('inspect_scene_animation', { sceneId });
+    assert.deepEqual(tracks.range, { start: 0, end: 30 });
     assert.equal(tracks.tracks.find((t: { nodeId: number }) => t.nodeId === added.nodeId).keyframes.length, 2);
     await call('remove_scene_keyframe', { sceneId, nodeId: added.nodeId, frameIndex: 10 });
     assert.equal((await call('undo_scene', { sceneId })).undone, true);
@@ -52,6 +54,7 @@ test('scene workflows, presets and registry animation bridge work together over 
     const decoded = loadVOXScene(path.join(root, 'out/scene.vox'));
     assert.equal(decoded.materials.find(m => m.id === 20)!.attributes._emit, '0.8');
     assert.equal(decoded.render.cameras[0]!.attributes._radius, '100');
+    assert.equal(decoded.render.meta!._anim_range, '0 30');
     const loaded = await call('load_scene', { path: 'out/scene.vox' });
     assert.equal((await call('undo_scene', { sceneId: loaded.sceneId })).undone, false);
     const animation = await call('create_animation');

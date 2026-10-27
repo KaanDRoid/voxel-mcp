@@ -1,37 +1,41 @@
 # Format compatibility
 
-"Supported" means the documented subset can be read or written. It does not
-mean byte-identical output to MagicaVoxel, a lossless conversion of all scene
-features, or validation by every other application's importer.
+Stable support means these documented subsets, not byte-identical output from
+every application. Keep VOX scenes as editable masters: surface meshes, six-bit
+palettes and Minecraft block mappings cannot preserve every VOX feature.
 
-| Format/workflow | Preserved or represented | Deliberate limits / verification |
+| Format | Preservation and verification | Limits |
 | --- | --- | --- |
-| MagicaVoxel VOX 150/200 scenes | Voxel indices, shared palette, multiple models, native node/layer/material records, keyframes and render metadata; unknown chunks preserved on unedited round-trips | Installed sample corpus strictly decodes and round-trips byte-for-byte. Native generated-scene saving, camera snapshot decoding and a four-model shape-animation render are supervised checks. General pivot/rotation baking, interpolation and every native metadata meaning are not certified. |
-| Single-model VOX | One selected model and its palette | Multi-model files require an explicit model index or scene/multi-model loading; a single-model export does not preserve a scene graph. |
-| Palette PNG | All 256 RGBA entries in MagicaVoxel slot order | 256 pixels required; installed palette PNGs are read in optional corpus tests. These files are palettes, not voxel renders. |
-| ACT | 256 RGB slots; supported count/transparency trailer on import | 768-byte RGB export. Alpha is not a general ACT RGB feature. Byte-level and round-trip tests; native application interchange is not certified. |
-| Palette VOX | Palette RGBA chunk | Palette-only container, not a full scene. Native palette import parity remains unverified. |
-| OBJ basic / Magica profile | Exposed surfaces, axis/scale settings; profile writes MTL plus palette PNG | Polygon ordering/merging and material dictionaries are not promised byte-identical to MagicaVoxel. OBJ does not retain voxel interiors, native scene animation, lights or cameras. Import voxelization is resolution-dependent. |
-| PLY / STL / glTF | Surface geometry with explicit axis/scale; PLY colors and glTF palette materials | STL has no palette/material representation here. These exporters do not carry native VOX keyframes or renderer settings. Geometry, winding, units and buffer layout are independently tested, not native-output byte parity. |
-| Qubicle QB | Supported raw/RLE voxel matrices, color order and orientation conversion | Documented supported subset with independent byte fixtures and raw/RLE round-trips; not the complete Qubicle project format or all native importer behavior. |
-| XRAW | Supported indexed and direct-color raw voxel layouts | Header, x-fastest order, palette and malformed-input tests. Other RAW dialects are not aliases of XRAW. |
-| Slab6 VOX | Grid occupancy and 6-bit palette | Not a MagicaVoxel VOX file despite the same extension. Palette precision loss is inherent and tested. Build-engine KVX is not implemented. |
-| Sponge schem v2/v3 | Block grid, palette/varints, axis conversion, supported block color mapping | Minecraft block mapping cannot preserve arbitrary voxel color/material semantics. Legacy schematic export is separate. Tests validate NBT bytes and import/export semantics. |
-| PNG/GIF/spritesheet | Rendered palette images and explicit frame data | These are raster previews, not native path-traced renders. GIF has at most 255 opaque colors plus binary transparency; optional quantization is lossy. |
-| Native Photo/Turntable/Anim | The application's own final-render PNG output | Opt-in calibrated Windows workflow, not an independent renderer. See [Native workflows](native-workflows.md) for dimensions, naming, bounds and cancellation limits. |
+| VOX 150/200 | Multiple models, palette, nodes/layers/materials, keys, render metadata; installed samples strictly round-trip byte-for-byte | Unknown chunks survive unchanged round-trips. Generated scenes, cameras, ranges and compiled ticks verified in Windows 0.99.7.2; not every native interpolation/metadata meaning is certified. |
+| Single-model VOX | Selected model and palette | Scene graph is not retained. |
+| Palette PNG/VOX; ACT | 256 slots; independent bytes and optional installed-palette tests | PNG/VOX retain RGBA; ACT export is 768 RGB bytes, not general RGBA. Palette files are not renders. |
+| OBJ basic/magica | Colored exposed surfaces, winding and axis/scale; magica writes MTL/palette PNG | Native asymmetric export verifies floor-half XY-centered pivot, 0.1 scale and Y-up geometry. Serialization order can differ. No interiors or native animation/cameras/lights. |
+| PLY points/magica | Default colored points; explicit magica colored surface mesh | Native surface comparison verifies magica centered pivot, 0.1 scale and Z-up. Points remain default. |
+| STL/glTF | Geometry/winding/units/buffers tested; glTF palette materials | STL has no palette here; no native scene animation/renderer metadata. |
+| Qubicle QB | Raw/RLE matrices, color order/axes, independent bytes and actual native asymmetric export | Not the entire Qubicle project format. |
+| XRAW | Unsigned RGBA8 indexed8 or direct rgba8, x-fastest; native indexed export verifies colored coordinates | Default export indexed8. Direct import preserves up to 255 occupied RGBA colors including partial alpha; larger input quantizes to opaque RGB with warnings. Histogram bounded to 65,536 RGB colors. Unsupported channel/index widths, invalid lengths/palette references rejected; alpha zero is empty in direct mode. |
+| Headerless RAW | Explicit rgba8/rgb8/indexed8 and x-fastest/z-fastest order | Dimensions/encoding required, order defaults x-fastest. Indexed import needs 256-entry palette, index 0 empty. RGBA alpha 0 empty. RGB needs explicit unused emptyColor sentinel on import; export reports alpha loss and returns sentinel/layout metadata. No guessing. |
+| Slab6 VOX | Native byte comparison verifies occupancy, Y/Z conversion and six-bit palette truncation | Not MagicaVoxel VOX. Z<=255; no alpha. |
+| Build-engine KVX | Stored slabs, six-face masks, fixed8 pivot, validated mip chain; independently authored reference-layout fixtures | Export all occupied cells and one mip; import validates<=5 ceil-halved mips and returns highest resolution. X/Y unchanged, Z flipped to server Z-up. Pivot uses grid boundaries in exact 1/256 units. Z<=255, per-X relative offsets<=65535. Omitted native interiors are not invented: import warns and returns stored cells. Six-bit RGB, no alpha;>255 used colors quantize with warning. |
+| Sponge schem v2/v3 | Grid/palette/varints, axes and block mapping; NBT/semantic tests | Blocks cannot preserve arbitrary colors/materials. Legacy schematic export separate. |
+| PNG/GIF/spritesheet | Palette previews and explicit frame data | Not native path tracing. GIF has binary transparency and<=255 opaque colors. |
+| Native Photo/Turntable/Anim | Actual PNG names/dimensions/CRCs verified | Windows opt-in; see [Native workflows](native-workflows.md). |
 
-## Choose a preservation target
+Save export_raw's returned metadata alongside its bytes: a headerless stream
+cannot identify its dimensions, channel encoding, order, palette or RGB empty
+sentinel. Unsupported RAW dialects are rejected, not silently guessed.
 
-- Keep `.vox` scenes as the editable master when layers, materials, camera slots
-  and native keyframes matter. Do not use a mesh or schematic as a scene backup.
-- Export meshes for surface-based tools and choose explicit axis/scale settings.
-- Use ACT only when RGB palette slots are enough; prefer PNG or palette VOX when
-  alpha matters.
-- Use the native export tools for native lighting/reflections rather than
-  treating `render_model` as an interchangeable renderer.
+RAW, KVX and XRAW enforce 64 MiB byte budgets and<=2,000,000 occupied cells before
+decoded voxel objects. KVX charges stored cells across all mips. General model,
+scene and format-specific dimension budgets also apply.
 
-Byte-for-byte parity is intentionally not a universal goal: different polygon
-ordering can describe the same surface, and some destination formats cannot
-represent the source's features at all. Additional native import/export
-comparisons and unimplemented KVX/RAW variants remain separate work, not hidden
-behind a successful reader/writer round-trip.
+## Native fixtures
+
+`tests/fixtures/native-0.99.7.2` contains only exports of this project's own
+asymmetric four-color 3x4x5 scene, not bundled application assets. Native
+XRAW/QB/Slab6/OBJ/PLY comparisons run portably. KVX, RAW and direct-color XRAW
+also use independently constructed bytes and malformed-input tests.
+
+Compare mesh surfaces, pivot, dimensions and winding, not serialization order.
+Account for six-bit quantization and do not expect hidden colors or scene
+metadata to survive surface export.

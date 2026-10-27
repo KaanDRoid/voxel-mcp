@@ -60,7 +60,7 @@ declare("scene", `
   remove_scene_object reparent_scene_object delete_scene_layer replace_scene_model set_scene_node
   set_scene_layer set_scene_render_object set_scene_camera set_scene_material
   set_scene_material_properties apply_scene_lighting_preset set_scene_camera_pose
-  set_scene_transform_keyframe set_scene_model_keyframe remove_scene_keyframe animation_to_scene
+  set_scene_transform_keyframe set_scene_model_keyframe remove_scene_keyframe animation_to_scene set_scene_animation_range
 `, ["scene-mutation"]);
 declare("scene", "extract_scene_model flatten_scene", ["model-mutation"]);
 declare("scene", "load_scene", ["file-read", "scene-mutation"], readPath);
@@ -78,9 +78,9 @@ declare("palette", "save_palette_to_png export_palette_png export_palette_act ex
 declare("palette", "list_magicavoxel_palettes load_magicavoxel_palette", ["file-read"]);
 declare("palette", "apply_magicavoxel_palette", ["file-read", "model-mutation"]);
 
-declare("formats", "export_obj export_ply export_stl export_gltf export_qb export_xraw export_slab6 export_minecraft_schem export_minecraft_schematic", ["file-write"], writePath);
+declare("formats", "export_obj export_ply export_stl export_gltf export_qb export_xraw export_slab6 export_kvx export_raw export_minecraft_schem export_minecraft_schematic", ["file-write"], writePath);
 declare("formats", "export_slices", ["file-write"], writeFolder);
-declare("formats", "import_obj import_svg import_qb import_xraw import_slab6 import_minecraft_schem", ["file-read", "model-mutation"], readPath);
+declare("formats", "import_obj import_svg import_qb import_xraw import_slab6 import_kvx import_raw import_minecraft_schem", ["file-read", "model-mutation"], readPath);
 
 declare("shaders", "generate_xs_shader_template");
 declare("shaders", "list_magicavoxel_shaders", ["file-read"]);
@@ -91,7 +91,7 @@ declare("shaders", "run_xs_shader", ["file-read", "model-mutation"], readPath);
 
 declare("app", "open_in_magicavoxel", ["file-read", "app-launch"], readPath);
 declare("app", "attach_magicavoxel_app", ["session-mutation"]);
-declare("app", "set_app_camera", ["app-input"]);
+declare("app", "set_app_camera set_app_animation_timing", ["app-input"]);
 declare("app", "export_native_render export_app_camera_snapshot export_native_sequence", ["app-input", "file-write"], writePath);
 
 export const KNOWN_TOOL_NAMES: readonly string[] = Object.freeze([...policies.keys()]);

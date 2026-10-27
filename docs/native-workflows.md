@@ -38,10 +38,12 @@ export_native_sequence {path:"out/clip.png", kind:"animation", start:2, end:3}
 
 This selects the actual Turntable or Anim panel and invokes its native Render
 button. It does not loop over Photo calls and does not use the palette preview.
-The currently opened native scene must contain the intended animation.
+The currently opened native scene must contain the intended animation. Animation
+export changes the active native playback range to the requested range, so an old
+range cannot silently clamp rendered ticks. This is an in-memory application edit.
 
 - Turntable: 1..120 frames, angle 0..360, blur 0..100; defaults are 12/360/0.
-- Animation: inclusive start/end in 0..120, at most 120 outputs. Turntable-only
+- Animation: inclusive start/end in 0..360, at most 120 outputs. Turntable-only
   parameters cannot be combined with animation or vice versa.
 - Naming: `orbit (0000).png`, `orbit (0001).png`, etc. An animation starting at
   frame 2 produces `clip (0002).png` and `clip (0003).png`, not zero-based suffixes.
@@ -64,12 +66,29 @@ immediately after a sequence. Its `imageWidth`/`imageHeight` control Photo only.
 
 ## Animation scene compatibility
 
-`animation_to_scene` creates the native world transform, group, object transform
-and shape hierarchy, with one copied model per source frame and native `_f`
-keys. The shape also stores `_loop`; FPS and duration metadata remain custom,
-so wall-clock playback timing is not guaranteed. Inspect returned scene nodes
-rather than hard-coding node IDs from earlier versions. Sparse-key interpolation
-and arbitrary imported graph shapes still need separate native comparisons.
+`animation_to_scene` defaults to compiled native timing: a distinct model and
+sequential `_f` key per quantized tick, including the last source frame's hold.
+Native META `_anim_range` spans 0..totalFrames-1; compiled clips are limited to
+361 ticks (0..360), subject to replicated voxel and scene allocation budgets.
+`nativeTiming:false` retains explicit sparse source-start keys without a native
+hold-duration guarantee. The native world/group/object/shape hierarchy and shape
+`_loop` are retained. Inspect returned node IDs rather than hard-coding them.
+
+`set_scene_animation_range {sceneId:"...", start:0, end:30}` edits saved native
+META with scene history; `inspect_scene_animation` reports the range.
+
+`set_app_animation_timing {start:0, end:30, frameIndex:0, speed:25}` submits live
+native controls. Both range endpoints are required together; indices are 0..360,
+and speed is the native nonlinear 0..100 slider, NOT FPS or milliseconds.
+**Stop native playback first:** its modal playback task can ignore console input.
+Command submission is not a state readback. A subsequent native VOX snapshot can
+be decoded to check saved `_anim_range`, with the camera snapshot side effects.
+
+FPS and source durations describe quantized ticks in custom metadata; there is
+no standardized native saved FPS field here. Native preview speed is application
+state and not a hard-real-time clock. For deterministic wall-clock media use the
+frame registry GIF duration settings or encode the rendered PNG sequence at an
+explicit frame rate in a video tool. Arbitrary native interpolation is not claimed.
 
 ## Supervised verification
 
@@ -83,6 +102,10 @@ On Windows with a scratch copy of 0.99.7.2:
   blue native animation frames at 2..3. A static scene alone was not treated as
   proof that animation playback changes the image.
 - A 64x48 native Photo export succeeded immediately after animation rendering.
+- A compiled 100ms/200ms two-source clip at 10 ticks/second exported three actual
+  960x800 native images: red, blue, blue, proving the final hold. An intentionally
+  changed active range 1..2 was decoded from a native saved META; requesting 0..2
+  correctly resets that range before rendering instead of clamping frame zero.
 
 These checks demonstrate these workflows, not every renderer setting, every
 animation graph or all-platform compatibility. Automated filesystem-verifier

@@ -6,7 +6,7 @@ import { checkDims, checkVoxelBudget } from "./common.js";
  *   i32 xsiz, ysiz, zsiz; u8 voxel[xsiz][ysiz][zsiz] (z varies fastest; 255 = empty, other values are palette
  *   entries); u8 palette[256][3] with VGA 6-bit components (0..63).
  * The grid holds at most 256 x 256 x 255. Voxel index n (1..255) is stored as slab color n - 1, and the
- * z axis is flipped (Slab6 z points down). The axis orientation relative to the Slab6 viewer is unverified. */
+ * Y/Z axes are flipped to match native MagicaVoxel Slab6 export; palette channels use its 6-bit truncation. */
 export function encodeSlab6(model: VoxModelData): Buffer {
   const { sizeX: sx, sizeY: sy, sizeZ: sz } = model;
   if (sz > 255) throw new Error("Slab6 export: the Z size is limited to 255");
@@ -18,7 +18,7 @@ export function encodeSlab6(model: VoxModelData): Buffer {
   out.fill(255, 12, 12 + volume);
   for (const v of model.voxels) {
     if (v.i < 1 || v.i > 255 || v.x < 0 || v.y < 0 || v.z < 0 || v.x >= sx || v.y >= sy || v.z >= sz) continue;
-    out[12 + (v.x * sy + v.y) * sz + (sz - 1 - v.z)] = v.i - 1;
+    out[12 + (v.x * sy + (sy - 1 - v.y)) * sz + (sz - 1 - v.z)] = v.i - 1;
   }
   for (let n = 1; n < 256; n++) {
     const c = unpackRGBA(palette[n] ?? 0);
@@ -45,7 +45,7 @@ export function decodeSlab6(buf: Buffer): { model: VoxModelData; warnings: strin
   for (let x = 0; x < sx; x++) for (let y = 0; y < sy; y++) for (let z = 0; z < sz; z++) {
     const value = buf[12 + (x * sy + y) * sz + z]!;
     if (value === 255) continue;
-    model.voxels.push({ x, y, z: sz - 1 - z, i: value + 1 });
+    model.voxels.push({ x, y: sy - 1 - y, z: sz - 1 - z, i: value + 1 });
   }
   return { model, warnings: [] };
 }

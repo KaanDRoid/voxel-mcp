@@ -1,0 +1,3 @@
+# Preserve actual native exports, including the empty OBJ object-name line.
+tests/fixtures/native-0.99.7.2/native* -text whitespace=cr-at-eol
+tests/fixtures/native-0.99.7.2/native.obj -whitespace

@@ -40,8 +40,8 @@ test('MagicaVoxel OBJ profile writes obj, mtl and a 256x1 palette texture with s
   const png = PNG.sync.read(fs.readFileSync(path.join(dir, 'plate.png')));
   assert.equal(png.width, 256); assert.equal(png.height, 1);
   assert.deepEqual([...png.data.subarray(0, 4)], [255, 0, 0, 255]); // index 1 is pixel 0
-  // scale 0.1, XZ-Y: x 0..0.4, y (voxel z) 0..0.1, z (-voxel y) -0.4..0
-  assert.deepEqual(bounds(objPoints(file)), [[0, 0.4], [0, 0.1], [-0.4, 0]]);
+  // Native centered XY pivot, scale 0.1, XZ-Y: x/z -0.2..0.2, y (voxel z) 0..0.1
+  assert.deepEqual(bounds(objPoints(file)), [[-0.2, 0.2], [0, 0.1], [-0.2, 0.2]]);
   const uv = text.split('\n').filter(l => l.startsWith('vt '));
   assert.equal(uv.length, 1);
   assert.ok(Math.abs(Number(uv[0]!.split(' ')[1]) - 0.5 / 256) < 1e-6);

@@ -57,6 +57,7 @@ test('direct handlers validate strict schemas before touching scene or registrie
   }, registry, animations);
   const valid: Record<string, Record<string, unknown>> = {
     inspect_scene_animation: { sceneId: 's1' },
+    set_scene_animation_range: { sceneId: 's1', start: 0, end: 360 },
     set_scene_transform_keyframe: { sceneId: 's1', nodeId: 0, frameIndex: 0, rotation: 4 },
     set_scene_model_keyframe: { sceneId: 's1', nodeId: 1, frameIndex: 0, modelIndex: 0 },
     remove_scene_keyframe: { sceneId: 's1', nodeId: 0, frameIndex: 0 },
@@ -66,9 +67,14 @@ test('direct handlers validate strict schemas before touching scene or registrie
     const args = valid[name]!;
     const invalid: Record<string, unknown>[] = [{ ...args, unexpected: true }];
     if ('frameIndex' in args) invalid.push({ ...args, frameIndex: '0' });
+    if (name === 'set_scene_animation_range') invalid.push(
+      { ...args, start: -1 }, { ...args, end: 361 }, { ...args, start: 0.5 },
+      { ...args, end: '30' }, { ...args, start: 31, end: 30 },
+    );
     if (name === 'animation_to_scene') invalid.push(
       { ...args, loop: 'false' }, { ...args, modelIds: Array(513).fill('m1') },
       { ...args, durationsMs: Array(513).fill(100) }, { animationId: 'a1', loop: 'false' },
+      { ...args, nativeTiming: 'false' },
     );
     for (const input of invalid) {
       await assert.rejects(tools.get(name)!(input));
@@ -196,11 +202,23 @@ test('animation_to_scene bridges the supplied AnimationRegistry with native shap
   assert.equal(result.source, 'animationRegistry'); assert.equal(result.sceneId, 's2');
   assert.deepEqual(result.timing.startFrames, [0, 1]); assert.equal(result.timing.totalFrames, 4);
   assert.equal(result.timing.totalDurationMs, 350); assert.equal(result.timing.fps, 10); assert.equal(result.timing.loop, false);
+  assert.equal(result.timing.mode, 'compiled');
+  assert.equal(result.modelCount, 4); assert.equal(result.keyframeCount, 4);
+  assert.deepEqual(result.timing.durationsMs, [100, 250]);
   assert.deepEqual(result.timing.quantizedDurationsMs, [100, 300]);
   assert.match(result.timing.note, /custom|not.*native/i);
+  assert.match(result.timing.note, /application/i);
   const s = decodeVOXScene(encodeVOXScene(h.scenes.get(result.sceneId)!));
   const shape = s.nodes.find(n => n.type === 'nSHP'); assert.equal(shape?.type, 'nSHP'); if (shape?.type !== 'nSHP') return;
-  assert.deepEqual(shape.models.map(m => [m.modelId, m.attributes._f]), [[0, '0'], [1, '1']]);
+  assert.deepEqual(shape.models.map(m => [m.modelId, m.attributes._f]), [[0, '0'], [1, '1'], [2, '2'], [3, '3']]);
+  assert.equal(s.models.length, 4);
+  assert.deepEqual(s.models.map(m => m.voxels[0]!.x), [0, 1, 1, 1]);
+  assert.equal(s.render.meta?._anim_range, '0 3');
+  assert.equal((await h.call('inspect_scene_animation', { sceneId: result.sceneId })).range.end, 3);
+  const stored = h.scenes.get(result.sceneId)!;
+  assert.notEqual(stored.models[1], stored.models[2]);
+  assert.notEqual(stored.models[1]!.voxels, stored.models[2]!.voxels);
+  assert.notEqual(stored.models[2]!.voxels[0], stored.models[3]!.voxels[0]);
   assert.equal(s.nodes.find(n => n.id === 1)?.type, 'nGRP', 'native animation needs a world group above object tracks');
   assert.equal(s.nodes.find(n => n.id === 2)?.type, 'nTRN');
   assert.equal(shape.id, 3);
@@ -263,9 +281,118 @@ test('inspection validates rotations in independently byte-authored native track
 test('inspection reports native transform and shape tracks without committing', async () => {
   const h = harness();
   const result = await h.call('inspect_scene_animation', { sceneId: 's1' });
+  assert.equal(result.range, undefined);
   assert.deepEqual(result.tracks.map((t: any) => [t.nodeId, t.type, t.keyframes[0].frameIndex, t.keyframes[0].explicit]), [[0, 'nTRN', 0, false], [1, 'nSHP', 0, false]]);
   assert.equal(result.tracks[0].keyframes[0].attributes.custom, 'frame');
   assert.equal(result.tracks[1].keyframes[0].modelIndex, 0);
   assert.deepEqual([...h.tools.keys()], [...SCENE_ANIMATION_TOOL_NAMES]);
   assert.equal(h.commits(), 0);
+});
+
+test('native range setter preserves all other scene data and META keys through encode/decode', async () => {
+  const initial = fixture();
+  initial.render.meta = { _anim_range: '0 30', unknown: 'keep' };
+  const original = decodeVOXScene(encodeVOXScene(initial));
+  const before = encodeVOXScene(original);
+  const h = harness(original);
+  assert.deepEqual(await h.call('set_scene_animation_range', { sceneId: 's1', start: 12, end: 360 }), { sceneId: 's1', range: { start: 12, end: 360 } });
+  assert.deepEqual(encodeVOXScene(original), before, 'borrowed source was not mutated');
+  const saved = decodeVOXScene(encodeVOXScene(h.scenes.get('s1')!));
+  assert.deepEqual({ ...saved.render.meta }, { _anim_range: '12 360', unknown: 'keep' });
+  assert.deepEqual(saved.nodes, original.nodes);
+  assert.deepEqual(saved.models, original.models);
+  assert.deepEqual(saved.document.main.children.filter(c => c.id !== 'META'), original.document.main.children.filter(c => c.id !== 'META'));
+  assert.equal(saved.document.main.children.filter(c => c.id === 'META').length, 1);
+  assert.deepEqual((await h.call('inspect_scene_animation', { sceneId: 's1' })).range, { start: 12, end: 360 });
+  await h.call('set_scene_animation_range', { sceneId: 's1', start: 0, end: 0 });
+  assert.equal(h.scenes.get('s1')!.render.meta!._anim_range, '0 0');
+  const missing = harness();
+  await missing.call('set_scene_animation_range', { sceneId: 's1', start: 360, end: 360 });
+  assert.equal(decodeVOXScene(encodeVOXScene(missing.scenes.get('s1')!)).render.meta!._anim_range, '360 360');
+});
+
+test('malformed existing native range rejects inspection and edits without commits', async () => {
+  for (const raw of ['', '0', '0 30 40', '-1 30', '0 361', '30 0', '0 1.5', 'NaN 30', '0 nope']) {
+    const s = fixture(); s.render.meta = { _anim_range: raw, custom: 'keep' };
+    const h = harness(s); const before = encodeVOXScene(s);
+    for (const [name, args] of [
+      ['inspect_scene_animation', { sceneId: 's1' }],
+      ['set_scene_animation_range', { sceneId: 's1', start: 0, end: 30 }],
+      ['set_scene_transform_keyframe', { sceneId: 's1', nodeId: 0, frameIndex: 5, translation: [0, 0, 0] }],
+      ['set_scene_model_keyframe', { sceneId: 's1', nodeId: 1, frameIndex: 5, modelIndex: 0 }],
+    ] as const) await assert.rejects(h.call(name, args), /native.*range|_anim_range/i);
+    assert.equal(h.commits(), 0); assert.deepEqual(encodeVOXScene(s), before);
+  }
+});
+
+test('default compiled bridge holds every source tick with distinct models including the last', async () => {
+  const h = harness(); const a = h.registry.create(2, 2, 2).id; const b = h.registry.create(2, 2, 2).id;
+  h.registry.set(a, model()); h.registry.set(b, { ...model(), voxels: [{ x: 1, y: 0, z: 0, i: 2 }] });
+  const result = await h.call('animation_to_scene', { modelIds: [a, b], fps: 10, durationsMs: [200, 300] });
+  const s = h.scenes.get(result.sceneId)!;
+  assert.equal(result.timing.mode, 'compiled');
+  assert.deepEqual(result.timing.startFrames, [0, 2]);
+  assert.deepEqual(result.timing.quantizedDurationsMs, [200, 300]);
+  assert.equal(result.keyframeCount, 5); assert.equal(result.modelCount, 5);
+  assert.deepEqual(s.models.map(m => m.voxels[0]!.i), [1, 1, 2, 2, 2]);
+  const shape = s.nodes.find(n => n.type === 'nSHP')!;
+  assert.equal(shape.type, 'nSHP'); if (shape.type !== 'nSHP') return;
+  assert.deepEqual(shape.models.map(m => [m.modelId, m.attributes._f]), [[0, '0'], [1, '1'], [2, '2'], [3, '3'], [4, '4']]);
+  assert.equal(s.render.meta!._anim_range, '0 4');
+  s.models[0]!.voxels[0]!.i = 9; s.models[4]!.voxels[0]!.i = 10;
+  assert.equal(s.models[1]!.voxels[0]!.i, 1); assert.equal(s.models[3]!.voxels[0]!.i, 2);
+  assert.equal(h.registry.get(a).voxels[0]!.i, 1); assert.equal(h.registry.get(b).voxels[0]!.i, 2);
+});
+
+test('compiled timeline accepts exactly 1..361 ticks and sparse mode never clamps a range', async () => {
+  const h = harness(); const id = h.registry.create(2, 2, 2).id; h.registry.set(id, model());
+  for (const ticks of [1, 361]) {
+    const result = await h.call('animation_to_scene', { modelIds: [id], fps: 10, durationsMs: [ticks * 100], nativeTiming: true });
+    assert.equal(result.modelCount, ticks); assert.equal(result.keyframeCount, ticks);
+    assert.equal(h.scenes.get(result.sceneId)!.render.meta!._anim_range, `0 ${ticks - 1}`);
+  }
+  for (const ticks of [3, 361, 362, 600]) {
+    const result = await h.call('animation_to_scene', { modelIds: [id, id], fps: 10, durationsMs: [100, (ticks - 1) * 100], nativeTiming: false });
+    assert.equal(result.timing.mode, 'sparse');
+    assert.match(result.timing.note, /no native duration guarantee/i);
+    assert.match(result.timing.note, /application/i);
+    assert.equal(result.modelCount, 2); assert.equal(result.keyframeCount, 2);
+    const scene = decodeVOXScene(encodeVOXScene(h.scenes.get(result.sceneId)!));
+    assert.equal(scene.render.meta?._anim_range, ticks <= 361 ? `0 ${ticks - 1}` : undefined);
+    assert.equal(scene.nodes[0]!.attributes.animation_total_frames, String(ticks));
+    const shape = scene.nodes.find(n => n.type === 'nSHP')!;
+    assert.equal(shape.type, 'nSHP'); if (shape.type !== 'nSHP') throw new Error();
+    assert.deepEqual(shape.models.map(m => [m.modelId, m.attributes._f]), [[0, '0'], [1, '1']]);
+  }
+});
+
+test('compiled tick, replicated voxel and transient budgets reject before voxel getters or copies', async () => {
+  for (const sourceKind of ['models', 'animation'] as const) {
+    for (const [ticks, voxelCount, error] of [
+      [362, 1, /1\.\.361|native.*tick|native.*range/i],
+      [361, 22_161, /voxel budget/i],
+      [65, 16_384, /allocation.*budget/i],
+    ] as const) {
+      const voxels = Array(voxelCount);
+      Object.defineProperty(voxels, 0, { get() { throw new Error('Voxel getter touched'); } });
+      voxels.map = () => { throw new Error('Voxel clone attempted'); };
+      const source = { ...model(), voxels };
+      const animations = new AnimationRegistry();
+      animations.getData = () => ({ name: 'Held', fps: 10, loop: true, frames: [{ model: source, durationMs: ticks * 100 }] });
+      const h = harness(fixture(), animations); h.registry.get = () => source;
+      const args = sourceKind === 'models' ? { modelIds: ['m1'], fps: 10, durationsMs: [ticks * 100] } : { animationId: 'a1' };
+      await assert.rejects(h.tools.get('animation_to_scene')!.handler(args), error);
+      assert.equal(h.commits(), 0); assert.equal(h.scenes.size, 1);
+    }
+  }
+});
+
+test('low-level native keys remain editable beyond the playback range', async () => {
+  const h = harness();
+  await h.call('set_scene_animation_range', { sceneId: 's1', start: 0, end: 30 });
+  await h.call('set_scene_transform_keyframe', { sceneId: 's1', nodeId: 0, frameIndex: 1_000_000, translation: [0, 0, 0] });
+  await h.call('set_scene_model_keyframe', { sceneId: 's1', nodeId: 1, frameIndex: 1_000_000, modelIndex: 1 });
+  const result = await h.call('inspect_scene_animation', { sceneId: 's1' });
+  assert.deepEqual(result.range, { start: 0, end: 30 });
+  assert.deepEqual(result.tracks.map((t: any) => t.keyframes[1].frameIndex), [1_000_000, 1_000_000]);
 });

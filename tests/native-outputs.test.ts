@@ -13,7 +13,7 @@ import { createVOXScene, encodeVOXScene } from '../src/scene.js';
 import { PNG } from 'pngjs';
 import { registerNativeOutputs } from '../src/appNativeOutputs.js';
 
-function fixture(t: { after(fn: () => void): void }, produce: (steps: { op: string; path?: string }[]) => void) {
+function fixture(t: { after(fn: () => void): void }, produce: (steps: { op: string; text?: string; path?: string }[]) => void) {
   const install = makeFakeInstall();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-output-'));
   t.after(() => { install.cleanup(); fs.rmSync(root, { recursive: true, force: true }); });
@@ -23,7 +23,7 @@ function fixture(t: { after(fn: () => void): void }, produce: (steps: { op: stri
     platform: 'win32', env: { [UI_AUTOMATION_ENV]: '1' }, settleSeconds: 0, now: () => clock, sleep: async ms => { clock += ms; },
     run: async (_s, data) => {
       if ((data as { mode: string }).mode === 'list') return { ok: true, processes: [{ pid: 42, exe: install.exe, startFileTime: '123' }] };
-      produce((data as { steps: { op: string; path?: string }[] }).steps);
+      produce((data as { steps: { op: string; text?: string; path?: string }[] }).steps);
       return { ok: true, steps: [] };
     },
   });
@@ -36,7 +36,7 @@ function fixture(t: { after(fn: () => void): void }, produce: (steps: { op: stri
 }
 
 test('camera snapshot tool returns actual native saved values rather than the requested pose', { skip: process.platform !== 'win32' }, async t => {
-  let steps: { op: string; path?: string }[] = [];
+  let steps: { op: string; text?: string; path?: string }[] = [];
   const f = fixture(t, value => {
     steps = value;
     if (!value.some(s => s.op === 'save_dialog')) return;
@@ -81,7 +81,7 @@ test('native snapshot/sequence tools are strict opt-in additions and file dialog
 });
 
 // Exercise filesystem verification independently of the Windows input adapter on every CI host.
-function portableFixture(t: { after(fn: () => void): void }, produce: (steps: { op: string; path?: string }[]) => void) {
+function portableFixture(t: { after(fn: () => void): void }, produce: (steps: { op: string; text?: string; path?: string }[]) => void) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-verifier-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const tools = new Map<string, { schema: z.ZodObject<z.ZodRawShape>; handler: (args: never) => Promise<CallToolResult> }>();
@@ -91,7 +91,7 @@ function portableFixture(t: { after(fn: () => void): void }, produce: (steps: { 
     sleep: async ms => { clock += ms; }, now: () => clock, settle: 0,
     execute: async input => {
       calls++;
-      produce((input as { op: string; path?: string }[]).map(s => ({ ...s, ...(s.path ? { path: s.path.replaceAll('\\', path.sep) } : {}) })));
+      produce((input as { op: string; text?: string; path?: string }[]).map(s => ({ ...s, ...(s.path ? { path: s.path.replaceAll('\\', path.sep) } : {}) })));
       return [];
     },
   });
@@ -125,6 +125,7 @@ for (const fault of ['crc', 'dimensions', 'old-timestamp'] as const) test(`seque
 
 test('animation suffixes are the inclusive native timeline indices, not zero-based output positions', async t => {
   const f = portableFixture(t, steps => {
+    assert.deepEqual(steps.filter(s=>s.op==='console').map(s=>s.text), ['set a_min 0','set a_max 3','set a_min 2','set pt_anim_f0 2','set pt_anim_f1 3']);
     const base = steps.find(s => s.op === 'save_dialog')!.path!;
     for (const i of [2, 3]) fs.writeFileSync(framePath(base, i), PNG.sync.write(new PNG({ width: 2, height: 2 })));
   });
@@ -149,4 +150,10 @@ test('camera snapshot verifier rejects a fresh project missing the captured slot
     if (save) fs.writeFileSync(save.path!, encodeVOXScene(createVOXScene([{ sizeX: 1, sizeY: 1, sizeZ: 1, voxels: [] }])));
   });
   await assert.rejects(f.call('export_app_camera_snapshot', { path: path.join(f.root, 'no-camera.vox') }), /requested camera slot/);
+});
+
+test('animation may render the final native timeline index while retaining the 120-output batch cap', async t => {
+  const f=portableFixture(t,steps=>{const base=steps.find(s=>s.op==='save_dialog')!.path!;fs.writeFileSync(framePath(base,360),PNG.sync.write(new PNG({width:2,height:2})));});
+  const r=await f.call('export_native_sequence',{path:path.join(f.root,'late.png'),kind:'animation',start:360,end:360});
+  assert.equal(JSON.parse((r.content[0] as {text:string}).text).frames[0].frameIndex,360);
 });
