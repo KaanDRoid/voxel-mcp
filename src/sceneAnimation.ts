@@ -116,7 +116,7 @@ export function registerSceneAnimationTools(register: RegisterTool, access: Scen
     validateAnimationScene(scene);
     return text({ sceneId: access.commit(scene, sceneId), nodeId, frameIndex });
   });
-  register({ name: 'animation_to_scene', description: 'Copy animationId from the supplied AnimationRegistry, or explicit modelIds from ModelRegistry, to native shape _f keyframes. Timing is quantized to fps; fps, duration and loop are custom metadata, not native VOX playback guarantees.', inputSchema: animationToSceneSchema }, async (args) => {
+  register({ name: 'animation_to_scene', description: 'Copy animationId from the supplied AnimationRegistry, or explicit modelIds from ModelRegistry, to native shape _f keyframes. Uses the native world-group/object hierarchy and shape _loop flag. Timing is quantized to fps; fps and durations remain custom metadata, not native playback guarantees.', inputSchema: animationToSceneSchema }, async (args) => {
     const { animationId, modelIds, fps: requestedFps, durationsMs, loop } = animationToSceneSchema.parse(args);
     if ((animationId !== undefined) === (modelIds !== undefined)) throw new Error('Provide exactly one of animationId or modelIds');
     if (animationId !== undefined && durationsMs !== undefined) throw new Error('durationsMs is only supported with modelIds');
@@ -143,11 +143,14 @@ export function registerSceneAnimationTools(register: RegisterTool, access: Scen
     const models = animation.frames.map(f => f.model);
     preflightSceneModels(models);
     const scene = createVOXScene(models);
+    scene.layers = [{ id: 0, attributes: { _name: 'Objects' } }];
     scene.nodes = [
       { type: 'nTRN', id: 0, attributes: { _name: animation.name, animation_fps: String(fps), animation_duration_ms: String(durationMs), animation_loop: String(looping), animation_durations_ms: JSON.stringify(animation.frames.map(f => f.durationMs)), animation_total_frames: String(totalFrames) }, childId: 1, layerId: -1, frames: [{ _f: '0', _t: '0 0 0' }] },
-      { type: 'nSHP', id: 1, attributes: {}, models: startFrames.map((frameIndex, modelId) => ({ modelId, attributes: { _f: String(frameIndex) } })) },
+      { type: 'nGRP', id: 1, attributes: {}, children: [2] },
+      { type: 'nTRN', id: 2, attributes: {}, childId: 3, layerId: 0, frames: [{ _t: '0 0 0' }] },
+      { type: 'nSHP', id: 3, attributes: { _loop: looping ? '1' : '0' }, models: startFrames.map((frameIndex, modelId) => ({ modelId, attributes: { _f: String(frameIndex) } })) },
     ];
     validateAnimationScene(scene);
-    return text({ sceneId: access.commit(scene), source: animationId !== undefined ? 'animationRegistry' : 'modelRegistry', timing: { fps, loop: looping, totalDurationMs: durationMs, totalFrames, startFrames, durationsMs: animation.frames.map(f => f.durationMs), quantizedDurationsMs: startFrames.map((start, i) => ((startFrames[i + 1] ?? totalFrames) - start) * 1000 / fps), note: 'fps, loop and durations are custom metadata; native _f indices alone do not guarantee playback timing.' } });
+    return text({ sceneId: access.commit(scene), source: animationId !== undefined ? 'animationRegistry' : 'modelRegistry', timing: { fps, loop: looping, totalDurationMs: durationMs, totalFrames, startFrames, durationsMs: animation.frames.map(f => f.durationMs), quantizedDurationsMs: startFrames.map((start, i) => ((startFrames[i + 1] ?? totalFrames) - start) * 1000 / fps), note: 'fps and durations are custom metadata; native _f and _loop do not guarantee wall-clock playback timing.' } });
   });
 }

@@ -17,11 +17,11 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for procedura
 - **Preview**: `render_model` returns a palette-colored PNG (`top`, `front`, `side`, `zmax`, `isometric`) directly to the client.
 - **Generators**: houses, characters, vehicles, furniture, weapons, structures, creatures, nature, terrain, trees, and city/venue helpers. Output is deterministic for a given seed.
 - **Images**: colorized voxelization, silhouettes, depth maps, edge detection and multi-view carving from PNG/JPEG.
-- **Animation**: frame registry, deterministic dissolve between frames, sprite sheets, PNG frame folders, GIF with per-frame timing and loop setting, native scene transform/model keyframes and `animation_to_scene`. Native keyframes preserve file metadata; playback timing in MagicaVoxel is not guaranteed.
+- **Animation**: frame registry, deterministic dissolve between frames, sprite sheets, PNG frame folders, GIF with per-frame timing and loop setting, native scene transform/model keyframes and `animation_to_scene`. Native keyframes use the native object hierarchy and shape loop flag; wall-clock playback timing in MagicaVoxel is not guaranteed.
 - **Palettes**: load and save MagicaVoxel palette PNGs (`import_palette_png`, `export_palette_png`), Adobe `.act` and palette-only VOX files; `remap_model_to_palette`, `quantize_model`, `sort_palette`, `find_nearest_color` and `merge_palettes` work in CIE Lab and report the color error.
 - **Export/import**: VOX, OBJ (basic or MagicaVoxel profile with `.mtl` and palette texture), PLY, STL, glTF 2.0 (embedded), PNG slices, Qubicle `.qb`, XRAW, Slab6 VOX, Sponge `.schem` (v2/v3) and legacy Minecraft `.schematic`; OBJ import with solid fill and colors, SVG import with paths, fills and transforms.
 
-- **Live application control (Windows, opt-in)**: `attach_magicavoxel_app`, `set_app_camera` and `export_native_render` drive a running MagicaVoxel window through its own console and Final Render dialog. Disabled unless `MAGICVOXEL_MCP_UI_AUTOMATION=1`; see [Live application control](#live-application-control-windows-opt-in).
+- **Live application control (Windows, opt-in)**: `attach_magicavoxel_app`, `set_app_camera`, `export_app_camera_snapshot`, `export_native_render` and `export_native_sequence` drive a running MagicaVoxel window through its own console and Final Render dialog. Disabled unless `MAGICVOXEL_MCP_UI_AUTOMATION=1`; see [Live application control](#live-application-control-windows-opt-in).
 - **xs shaders**: `list_xs_shaders`, `read_xs_shader`, `validate_xs_shader`, `write_xs_shader` (workspace only), `generate_xs_shader_template` and `run_xs_shader`. Shaders are read from the workspace or from the `shader` folder of the MagicaVoxel install (`MAGICAVOXEL_HOME`, or the folder of `MAGICAVOXEL_PATH`); the install folder is never written. `run_xs_shader` uses a built-in sandboxed interpreter for a documented GLSL subset (no code is evaluated by the JavaScript engine) and is undoable. See `docs/xs-shader-evaluation.md`.
 
 See [Scene workflows](docs/scene-workflows.md) for object insertion/duplication/removal/reparenting, layer deletion, scene history, typed materials/lighting/cameras, native keyframes and installed palette workflows.
@@ -29,7 +29,7 @@ See [Scene workflows](docs/scene-workflows.md) for object insertion/duplication/
 ## Requirements
 
 - Node.js 22.2 or newer
-- MagicaVoxel is optional: it is needed for `open_in_magicavoxel` and for the installation discovery tools
+- MagicaVoxel is optional: it is needed for application launch/control and installation discovery tools
 
 ## Install
 
@@ -93,20 +93,31 @@ these materials, reflections, bloom or native render settings. Live camera chang
 
 ## Live application control (Windows, opt-in)
 
-MagicaVoxel can be driven while it is running, with three tools. They are off unless the server is started with `MAGICVOXEL_MCP_UI_AUTOMATION=1`, they only work on Windows, and they are calibrated for MagicaVoxel 0.99.7.2 (other versions are refused unless `MAGICVOXEL_MCP_UI_ANY_VERSION=1`).
+MagicaVoxel can be driven while it is running, with five tools. They are off unless the server is started with `MAGICVOXEL_MCP_UI_AUTOMATION=1`, they only work on Windows, and they are calibrated for MagicaVoxel 0.99.7.2 (other versions are refused unless `MAGICVOXEL_MCP_UI_ANY_VERSION=1`).
 
 1. `attach_magicavoxel_app` pins one running process. It matches the executable path from `MAGICAVOXEL_PATH`, the process id and the process start time; a window title or file name is never trusted. Start the application with `open_in_magicavoxel` first and switch it to **Render mode**.
 2. `set_app_camera` types the application's own console commands `cam x/y/z`, `cam zoom`, `cam fov` and `cam rx/ry/rz` (absolute values, angles in degrees; a negative `rx` looks down from above). `focus: true` first runs `cam focus`, which re-frames the whole scene. `zoom` was not calibrated and is not a linear distance: a small value can move the camera far into the scene, so start with `focus` and check the result.
 3. `export_native_render` sets the Photo size, clicks the application's own Render button, enters the output path in the save dialog that this click opened and waits. It returns only when the PNG exists, has stopped changing, is a regular file inside the workspace that was written during this call, passes structure and checksum checks, and has the requested size (`imageWidth`, `imageHeight`, 1..12000). It never overwrites a file, and the path must be plain (absolute, no `% * ? " < > |`).
+
+4. `export_app_camera_snapshot` saves the actual current pose into a camera slot, uses native Save As to a fresh workspace `.vox` file and returns the decoded native camera dictionary. This changes the slot and active project filename.
+5. `export_native_sequence` invokes native Turntable or Anim Final Render and verifies every expected PNG. Sequences use the current render-buffer resolution, not Photo dimensions. Turntables allow up to 120 frames; animations use an inclusive timeline range with at most 120 outputs.
+
+```text
+export_app_camera_snapshot {path:"out/camera.vox", cameraId:9}
+export_native_sequence {path:"out/orbit.png", kind:"turntable", frames:24, angle:360, blur:0}
+export_native_sequence {path:"out/clip.png", kind:"animation", start:2, end:3}
+```
+
+See [Native workflows](docs/native-workflows.md) for side effects, filename suffixes, safety limits and supervised checks. Keep the window fully on screen and close existing dialogs first.
 
 What the tools guarantee, and what they do not:
 
 - Before every single key press and click the helper checks that the pinned process owns the foreground, and before each click that the window under the cursor belongs to it. If another window takes the foreground, or the mouse is moved, input stops with an error. There is also a time budget, and modifier keys are released on failure. A check cannot be atomic with the input event, so a window that appears in that instant can still receive one event: do not use the computer while a call runs (a few seconds, plus the render).
 - Focus is moved with thread attachment, not with synthetic keys, so nothing is sent to the window that was in front.
 - The console is not cleared with Backspace. The text goes into the console field as keystrokes, so the application must really be in Render mode: in the model editor the typed letters are editing shortcuts. The tools cannot check the mode.
-- The process identity and the finished file are verified. A camera command is only reported as submitted, because the application does not report its camera back.
+- Process identity and finished files are verified. Camera commands are reported as submitted; `export_app_camera_snapshot` separately decodes the actual pose from a fresh native Save As snapshot. It changes the selected camera slot, updates that slot and changes the active project filename; it is not passive memory polling.
 - Click positions (Image tab, Render button, console) are relative to the window and the `ui_scale` setting; they were calibrated on one layout. If the save dialog does not appear, the call fails instead of guessing. An application running as administrator cannot receive the input, and the call reports that.
-- The foreground check compares the process, not one specific window: an unexpected MagicaVoxel message box that has focus would receive the typed text. The save dialog is recognised as a new dialog of the pinned process, not by its title or controls.
+- Existing dialogs refuse automation before input. Main-window input requires that exact window in front. A new native file dialog must have the expected owner and filename controls, and filename input additionally checks focus on that exact field. Unexpected dialogs stop input rather than receiving the path.
 - Bringing the window to the front visibly interrupts whatever you are doing, and other tools wait while a render runs.
 - Only one live operation runs at a time. Final renders take as long as the application needs.
 
@@ -147,6 +158,8 @@ interlaced files. Schematic NBT input is limited to 64 MiB after decompression,
 - Scene model IDs are zero-based positions in the scene's model list.
 - Scene material ids are 1..256, as found in files written by the application. How id 256 maps to a palette slot is unverified.
 
+See the [format compatibility matrix](docs/format-compatibility.md) for what each conversion preserves, what is deliberately lossy and what still lacks native-application parity checks.
+
 ## Format notes
 
 - Mesh exports (`export_obj`, `export_ply`, `export_stl`, `export_gltf`) take `scale` (output units per voxel) and `axis`. An axis is three signed letters: `XYZ` keeps Z up (STL default), `XZ-Y` is Y up (OBJ and glTF default; a rotation, so faces keep their winding). `export_obj` with `profile: "magica"` uses the `io_obj` defaults of MagicaVoxel (`scale` 0.1, merged faces) and writes `<name>.mtl` and `<name>.png` beside the OBJ.
@@ -166,6 +179,13 @@ save_vox {id:"1", path:"out/hollow_sphere.vox"}
 
 ## Development
 
+`tests/` is for development and regression checks, not MCP runtime use. The
+packed production distribution excludes both `tests/` and TypeScript sources;
+it runs the compiled `dist/` files with production dependencies. Keep tests in
+the repository so changes can be verified. Source builds need the development
+dependencies for TypeScript; a prebuilt tarball does not.
+
+
 ```bash
 npm run typecheck   # strict type check of sources and tests
 npm test            # build, then run all tests, including real stdio MCP sessions
@@ -178,7 +198,7 @@ npm run check       # typecheck, tests and npm audit
 - SVG import is fill-only: strokes, text, gradients, CSS classes, clipping, opacity, `use` and elliptical arcs raise an "unsupported SVG" error.
 - GIF frames are limited to 255 opaque colors with on/off transparency; use `quantize: "median-cut"` (and optionally `dither: "floyd"`) to reduce colors instead of failing.
 - OBJ, PLY, MC-style and other MagicaVoxel exports have not been compared against the application's own output (parity unverified).
-- MagicaVoxel has no documented command-line or RPC interface. Live control (Windows only, opt-in) types into its own console and clicks its native dialog, so it needs the window in Render mode and cannot read the application state back.
+- MagicaVoxel has no documented command-line or RPC interface. Live control (Windows only, opt-in) types into its own console and clicks its native dialog, so it needs the window in Render mode. Camera readback uses an explicit side-effecting native snapshot, not a passive application-state API.
 
 ## License
 

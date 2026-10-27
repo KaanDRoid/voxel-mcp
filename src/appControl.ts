@@ -7,6 +7,7 @@ import type { FilePolicy } from "./files.js";
 import type { MagicaConfig } from "./magicaConfig.js";
 import { resolveInstall } from "./magicaInstall.js";
 import { inspectPng } from "./png.js";
+import { registerNativeOutputs } from "./appNativeOutputs.js";
 import { currentRequestSignal, throwIfRequestAborted, poisonRequestQueue } from "./requestContext.js";
 
 type RegisterTool = <T extends z.ZodRawShape>(definition: { name: string; description: string; inputSchema: z.ZodObject<T> }, handler: (args: z.infer<z.ZodObject<T>>) => Promise<CallToolResult>) => void;
@@ -18,7 +19,7 @@ export const UI_AUTOMATION_ENV = "MAGICVOXEL_MCP_UI_AUTOMATION";
 export const UI_ANY_VERSION_ENV = "MAGICVOXEL_MCP_UI_ANY_VERSION";
 export const CALIBRATED_VERSION = "0.99.7.2";
 /** Tools that drive the real application window; they are never read-only. */
-export const APP_CONTROL_TOOLS = ["attach_magicavoxel_app", "set_app_camera", "export_native_render"];
+export const APP_CONTROL_TOOLS = ["attach_magicavoxel_app", "set_app_camera", "export_native_render", "export_app_camera_snapshot", "export_native_sequence"];
 
 /** Identity of one running application process. A title or a file name alone is never trusted. */
 export interface AppIdentity { pid: number; exe: string; startFileTime: string }
@@ -95,13 +96,25 @@ public static class Ui {
   [DllImport("user32.dll")] static extern void mouse_event(uint f, int dx, int dy, uint d, UIntPtr e);
   [DllImport("user32.dll")] static extern uint SendInput(uint n, INPUT[] i, int size);
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+  [StructLayout(LayoutKind.Sequential)] public struct GUIINFO { public uint size, flags; public IntPtr active, focus, capture, menu, move, caret; public RECT caretRect; }
+  [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref GUIINFO info);
+  static IntPtr ExpectedDialog, ExpectedEdit;
   static uint Target; static long DeadlineMs; static Stopwatch Clock = Stopwatch.StartNew();
+  public static void ExpectWindow(IntPtr h) { ExpectedDialog=h; ExpectedEdit=IntPtr.Zero; }
   public static void Arm(uint pid, long deadlineMs) { Target = pid; DeadlineMs = deadlineMs; Clock.Restart(); SetProcessDPIAware(); }
   public static uint PidOf(IntPtr h) { uint p; GetWindowThreadProcessId(h, out p); return p; }
   // Called before every single input event: the pinned process must own the foreground right now.
   static void Guard() {
     if (Clock.ElapsedMilliseconds > DeadlineMs) throw new Exception("The automation time budget was exceeded; input stopped");
     if (PidOf(GetForegroundWindow()) != Target) throw new Exception("Another window took the foreground; input stopped");
+    if (ExpectedDialog!=IntPtr.Zero) {
+      if(GetForegroundWindow()!=ExpectedDialog) throw new Exception("The expected file dialog lost the foreground; input stopped");
+      if(ExpectedEdit!=IntPtr.Zero) {
+        uint pid; uint thread=GetWindowThreadProcessId(ExpectedDialog,out pid);
+        GUIINFO info=new GUIINFO();info.size=(uint)Marshal.SizeOf(typeof(GUIINFO));
+        if(!GetGUIThreadInfo(thread,ref info) || info.focus!=ExpectedEdit) throw new Exception("The native filename field is not focused; input stopped");
+      }
+    }
   }
   // Moves the foreground to a window of the pinned process without sending any key to another window.
   public static bool Front(IntPtr h) {
@@ -129,6 +142,38 @@ public static class Ui {
     }, IntPtr.Zero);
     return found.ToArray();
   }
+  [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumProc p, IntPtr l);
+  [DllImport("user32.dll")] static extern int GetDlgCtrlID(IntPtr h);
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint command);
+
+  [DllImport("user32.dll", CharSet=CharSet.Unicode, EntryPoint="SendMessageTimeoutW")] static extern IntPtr ReadText(IntPtr h, uint msg, IntPtr wp, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
+  [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW")] static extern IntPtr SendButton(IntPtr h, uint msg, IntPtr wp, IntPtr lp, uint flags, uint timeout, out UIntPtr result);
+  static string ClassOf(IntPtr h) { StringBuilder c=new StringBuilder(128); GetClassName(h,c,128); return c.ToString(); }
+  public static IntPtr FileNameEdit(IntPtr dialog, IntPtr main) {
+    if (PidOf(dialog)!=Target || ClassOf(dialog)!="#32770" || GetAncestor(GetWindow(dialog,4),3)!=GetAncestor(main,3)) throw new Exception("Unrecognised save dialog owner");
+    IntPtr edit=IntPtr.Zero, save=IntPtr.Zero; int edits=0;
+    EnumChildWindows(dialog,delegate(IntPtr h,IntPtr l) {
+      if(IsWindowVisible(h) && ClassOf(h)=="Edit" && GetDlgCtrlID(h)==1001) { edit=h; edits++; }
+      if(IsWindowVisible(h) && ClassOf(h)=="Button" && GetDlgCtrlID(h)==1) save=h;
+      return true;
+    },IntPtr.Zero);
+    if(edits!=1 || save==IntPtr.Zero) throw new Exception("The new dialog is not a recognised native file-save dialog; no input sent");
+    return edit;
+  }
+  public static void SetSavePath(IntPtr dialog, IntPtr main, string path) {
+    Guard(); if(GetForegroundWindow()!=dialog) throw new Exception("The expected save dialog does not own the foreground");
+    IntPtr edit=FileNameEdit(dialog,main); UIntPtr result;
+    // WM_SETTEXT changes the visible field but may leave the shell dialog's filename model stale.
+    // Focus the recognised filename control and deliver real edits, guarding that exact focus.
+    if(SendButton(dialog,40,edit,new IntPtr(1),2,1000,out result)==IntPtr.Zero) throw new Exception("The filename field could not be focused");
+    ExpectedDialog=dialog; ExpectedEdit=edit;
+    try {
+      Guard(); Press(0x41,true); TypeText(path);
+      StringBuilder actual=new StringBuilder(1024);
+      if(ReadText(edit,13,new IntPtr(actual.Capacity),actual,2,1000,out result)==IntPtr.Zero || actual.ToString()!=path) throw new Exception("The native filename control did not retain the requested path");
+      Guard(); Press(0x0D,false);
+    } finally { ExpectedDialog=main; ExpectedEdit=IntPtr.Zero; }
+  }
   static INPUT Key(ushort vk, ushort scan, uint flags) { INPUT i = new INPUT(); i.type = 1; i.u.ki.vk = vk; i.u.ki.scan = scan; i.u.ki.flags = flags; return i; }
   static void SendRaw(INPUT i) { INPUT[] a = new INPUT[] { i }; if (SendInput(1, a, Marshal.SizeOf(typeof(INPUT))) != 1) throw new Exception("SendInput was refused (is MagicaVoxel running as administrator?)"); }
   static void Send(INPUT i) { Guard(); SendRaw(i); }
@@ -136,7 +181,11 @@ public static class Ui {
   public static void TypeText(string s) { foreach (char c in s) { Send(Key(0, c, 4)); Send(Key(0, c, 6)); Thread.Sleep(12); } }
   public static void Press(ushort vk, bool ctrl) {
     bool down = false;
-    try { if (ctrl) { Send(Key(0x11, 0, 0)); down = true; } Send(Key(vk, 0, 0)); Send(Key(vk, 0, 2)); }
+    try {
+      if (ctrl) { Send(Key(0x11, 0, 0)); down = true; }
+      Guard(); INPUT[] pair=new INPUT[] {Key(vk,0,0),Key(vk,0,2)};
+      if(SendInput(2,pair,Marshal.SizeOf(typeof(INPUT)))!=2) throw new Exception("SendInput key pair was refused");
+    }
     finally { if (down) { try { SendRaw(Key(0x11, 0, 2)); } catch { } } }
   }
   // Both the foreground and the window under the cursor are checked again right before the button goes down.
@@ -175,9 +224,11 @@ try {
   $main = $proc.MainWindowHandle
   if ($main -eq [IntPtr]::Zero) { throw 'The MagicaVoxel main window was not found' }
   [Ui]::Arm($target, [long]$in.budgetMs)
+  if ([Ui]::Dialogs($target).Length -gt 0) { throw 'A dialog is already open in MagicaVoxel; close it before automation' }
+  [Ui]::ExpectWindow($main)
   function Assure([IntPtr]$h) {
-    if ([Ui]::PidOf([Ui]::GetForegroundWindow()) -ne $target) { [void][Ui]::Front($h) }
-    if ([Ui]::PidOf([Ui]::GetForegroundWindow()) -ne $target) { throw 'Foreground focus could not be given to the pinned MagicaVoxel process; no input was sent' }
+    if ([Ui]::GetForegroundWindow() -ne $h) { [void][Ui]::Front($h) }
+    if ([Ui]::GetForegroundWindow() -ne $h) { throw 'Foreground focus could not be given to the pinned MagicaVoxel process; no input was sent' }
   }
   function ClickRel([int]$dx, [int]$dy, [string]$anchor) {
     $r = [Ui]::Rect($main); $s = [double]$in.scale
@@ -197,10 +248,24 @@ try {
         Start-Sleep -Milliseconds ([int]$step.waitMs)
       }
       'image_tab' { Assure $main; ClickRel 196 113 'top-right'; Start-Sleep -Milliseconds 700 }
+      'image_mode' {
+        Assure $main
+        switch ($step.kind) {
+          'photo' { ClickRel 239 171 'top-right' }
+          'turntable' { ClickRel 239 198 'top-right' }
+          'animation' { ClickRel 239 230 'top-right' }
+          default { throw 'Unknown native image mode' }
+        }
+      }
+      'save_project_as' {
+        Assure $main
+        $knownDialogs = @([Ui]::Dialogs($target) | ForEach-Object { $_.ToInt64() })
+        ClickRel 118 40 'top-right'
+      }
       'render_button' {
         Assure $main
         $knownDialogs = @([Ui]::Dialogs($target) | ForEach-Object { $_.ToInt64() })
-        ClickRel 239 345 'top-right'
+        if ($step.kind -eq 'turntable') { ClickRel 239 377 'top-right' } else { ClickRel 239 345 'top-right' }
       }
       'save_dialog' {
         $deadline = (Get-Date).AddMilliseconds([int]$step.timeoutMs); $dlg = $null
@@ -210,7 +275,8 @@ try {
         }
         if (-not $dlg) { throw 'The native save dialog did not appear. Switch MagicaVoxel to its Render mode and try again' }
         if (-not [Ui]::Front($dlg)) { throw 'The save dialog could not be brought to the foreground; no input was sent' }
-        [Ui]::Press(0x41, $true); [Ui]::TypeText([string]$step.path); Start-Sleep -Milliseconds 300; [Ui]::Press(0x0D, $false)
+        [Ui]::ExpectWindow($dlg)
+        [Ui]::SetSavePath($dlg, $main, [string]$step.path)
         $gone = (Get-Date).AddSeconds(8)
         while ((Get-Date) -lt $gone -and [Ui]::Dialogs($target).Length -gt 0 -and ([Ui]::Dialogs($target) | Where-Object { $knownDialogs -notcontains $_.ToInt64() })) { Start-Sleep -Milliseconds 250 }
         if ([Ui]::Dialogs($target) | Where-Object { $knownDialogs -notcontains $_.ToInt64() }) { throw 'A dialog is still open after the file name was entered; the render may nevertheless have started, so check the output folder before retrying' }
@@ -240,7 +306,9 @@ export function makeRunner(spawnFn: SpawnFn = spawn, options: {
   return (script, input, timeoutMs) => new Promise((resolve, reject) => {
     const signal = currentRequestSignal();
     throwIfRequestAborted(signal);
-    const encoded = Buffer.from(script, "utf16le").toString("base64");
+    // Keep the Windows command line short; the full script and payload travel as ASCII JSON on stdin.
+    const bootstrap = "$packet=[Console]::In.ReadToEnd()|ConvertFrom-Json; [Console]::SetIn((New-Object System.IO.StringReader([string]$packet.payload))); & ([ScriptBlock]::Create([string]$packet.script))";
+    const encoded = Buffer.from(bootstrap, "utf16le").toString("base64");
     const child = spawnFn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], { shell: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     let out = "", err = "", settled = false;
     let stopError: Error | undefined, killError: Error | undefined;
@@ -301,7 +369,7 @@ export function makeRunner(spawnFn: SpawnFn = spawn, options: {
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
     // ASCII only, so no console code page can change the meaning of a path.
-    if (!stopError) child.stdin?.end(JSON.stringify(input).replace(/[\u007f-\uffff]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`));
+    if (!stopError) child.stdin?.end(JSON.stringify({ script, payload: JSON.stringify(input) }).replace(/[\u007f-\uffff]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`));
   });
 }
 export const runPowerShell: PowerShellRunner = makeRunner();
@@ -379,6 +447,8 @@ export function registerAppControlTools(register: RegisterTool, files: FilePolic
     return result.steps ?? [];
   };
 
+  registerNativeOutputs(register, files, { enabled, exclusive, execute, checkPath: checkTypablePath, sleep, now, settle });
+
   register({
     name: "attach_magicavoxel_app",
     description: `Pin a running MagicaVoxel process (matched by the configured executable path, process id and start time) for live control. Requires MAGICVOXEL_MCP_UI_AUTOMATION=1 on Windows and MagicaVoxel ${CALIBRATED_VERSION} (the click positions were calibrated on it). Pass pid when several instances run`,
@@ -438,7 +508,7 @@ export function registerAppControlTools(register: RegisterTool, files: FilePolic
     const nativePath = platform === "win32" ? target.replace(/\//g, "\\") : target;
     const steps = [
       ...commands.map(command => ({ op: "console", text: command, waitMs: 500 })),
-      { op: "image_tab" }, { op: "render_button" },
+      { op: "image_tab" }, { op: "image_mode", kind: "photo" }, { op: "render_button" },
       { op: "save_dialog", path: nativePath, timeoutMs: 20000 },
     ];
     const startedWall = Date.now();

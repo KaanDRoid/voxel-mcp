@@ -101,9 +101,10 @@ registry `modelIds`, optional `durationsMs`, `fps` and `loop`. Select exactly on
 source. Every model is copied into the new scene; the source remains independent.
 
 Durations are quantized to timeline ticks. A duration that collapses below one
-tick is rejected rather than silently losing a frame. FPS, loop and duration
-fields are custom metadata preserved by this server, not a guarantee that
-MagicaVoxel will play a saved scene at those timings. Native `_f` keys are stored
+tick is rejected rather than silently losing a frame. The native shape `_loop`
+flag is written alongside custom FPS/duration metadata; none of these fields is
+an assurance of native wall-clock playback timing. The bridge uses the native
+world/group/object/shape hierarchy. Native `_f` keys are stored
 in shape model references.
 
 ## Installed palettes
