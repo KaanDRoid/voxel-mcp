@@ -88,7 +88,7 @@ export function registerNativeOutputs(register: Register, files: FilePolicy, acc
   const sequenceSchema = z.object({
     path: z.string(), kind: z.enum(['turntable', 'animation']),
     frames: z.number().int().min(1).max(120).optional(), angle: z.number().int().min(0).max(360).optional(), blur: z.number().int().min(0).max(100).optional(),
-    start: z.number().int().min(0).max(120).optional(), end: z.number().int().min(0).max(120).optional(),
+    start: z.number().int().min(0).max(360).optional(), end: z.number().int().min(0).max(360).optional(),
     timeoutSeconds: z.number().int().min(30).max(3600).default(600),
   }).strict().superRefine((v, ctx) => {
     const bad = (message: string) => ctx.addIssue({ code: 'custom', message });
@@ -98,7 +98,7 @@ export function registerNativeOutputs(register: Register, files: FilePolicy, acc
       if (v.start === undefined || v.end === undefined || v.end < v.start || v.end - v.start + 1 > 120) bad('Animation requires an inclusive start..end range of at most 120 frames');
     }
   });
-  register({ name: 'export_native_sequence', description: 'Run MagicaVoxel native Final Render Turntable or Anim, not palette previews or a loop of Photo calls. Uses the current native render-buffer resolution (Photo width/height do NOT set sequence size). Turntable accepts frames 1..120, angle 0..360 and blur 0..100; animation uses inclusive start/end 0..120 with at most 120 outputs. Writes base (0000).png style files; animation suffixes use native timeline indices. Validates every fresh stable frame and common dimensions. Requires Windows opt-in and Render mode; cancellation cannot stop a native job already started.', inputSchema: sequenceSchema }, args => access.exclusive(async () => {
+  register({ name: 'export_native_sequence', description: 'Run MagicaVoxel native Final Render Turntable or Anim, not palette previews or a loop of Photo calls. Uses the current native render-buffer resolution (Photo width/height do NOT set sequence size). Turntable accepts frames 1..120, angle 0..360 and blur 0..100; animation normalizes the active playback range, then uses inclusive start/end 0..360 with at most 120 outputs. Writes base (0000).png style files; animation suffixes use native timeline indices. Validates every fresh stable frame and common dimensions. Requires Windows opt-in and Render mode; cancellation cannot stop a native job already started.', inputSchema: sequenceSchema }, args => access.exclusive(async () => {
     access.enabled();
     const options = sequenceSchema.parse(args);
     const base = target(options.path, '.png');
@@ -112,7 +112,7 @@ export function registerNativeOutputs(register: Register, files: FilePolicy, acc
     }
     const commands = options.kind === 'turntable'
       ? [`set pt_spin_frames ${count}`, `set pt_spin_angle ${options.angle ?? 360}`, `set pt_spin_blur ${options.blur ?? 0}`]
-      : [`set pt_anim_f0 ${start}`, `set pt_anim_f1 ${options.end!}`];
+      : [`set a_min 0`, `set a_max ${options.end!}`, `set a_min ${start}`, `set pt_anim_f0 ${start}`, `set pt_anim_f1 ${options.end!}`];
     const startedWall = Date.now();
     await access.execute([
       ...commands.map(command => ({ op: 'console', text: command, waitMs: 300 })),

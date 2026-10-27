@@ -100,12 +100,19 @@ call `animation_to_scene` with its `animationId`. Alternatively pass explicit
 registry `modelIds`, optional `durationsMs`, `fps` and `loop`. Select exactly one
 source. Every model is copied into the new scene; the source remains independent.
 
-Durations are quantized to timeline ticks. A duration that collapses below one
-tick is rejected rather than silently losing a frame. The native shape `_loop`
-flag is written alongside custom FPS/duration metadata; none of these fields is
-an assurance of native wall-clock playback timing. The bridge uses the native
-world/group/object/shape hierarchy. Native `_f` keys are stored
-in shape model references.
+Durations are quantized to timeline ticks; sub-tick source frames are rejected.
+Default `nativeTiming:true` copies a distinct native model for every tick,
+including the final source hold, and writes sequential shape `_f` keys plus
+META `_anim_range`. Clips are bounded to 361 ticks, eight million replicated
+voxels and the scene allocation/storage budgets. Sources remain independent.
+`nativeTiming:false` explicitly retains sparse start keys without native hold
+assurances. The native world/group/object/shape graph and `_loop` are retained.
+FPS/duration metadata are descriptive, not a standardized native file FPS field.
+See [Native workflows](native-workflows.md) for live speed and render controls.
+
+`set_scene_animation_range` takes `sceneId`, `start` and `end` (inclusive 0..360),
+preserves unrelated metadata and participates in scene history.
+`inspect_scene_animation` returns the parsed native range.
 
 ## Installed palettes
 

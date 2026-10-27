@@ -42,6 +42,21 @@ function setup(t: TestContext, deps: AppControlDeps = {}) {
 
 const process1 = (exe: string, pid = 4242) => ({ pid, exe, startFileTime: '134000000000000000' });
 
+test('live animation timing requires attachment, propagates helper refusal and reports only submission', async t => {
+  let fail=false;
+  const h=setup(t,{run:async (_script,input)=>{
+    if((input as {mode:string}).mode==='list')return {ok:true,processes:[process1(h.install.exe,77)]};
+    return fail?{ok:false,error:'Probe helper refusal'}:{ok:true,steps:['console']};
+  }});
+  assert.match(((await h.call('set_app_animation_timing',{speed:25})) as {error:string}).error,/No application is attached/);
+  await h.call('attach_magicavoxel_app');
+  const result=await h.call('set_app_animation_timing',{start:2,end:3,speed:25});
+  assert.ok(result.ok);assert.equal(result.value.applied,'not confirmed by the application');
+  assert.deepEqual(result.value.submitted,['set a_min 0','set a_max 3','set a_min 2','set a_speed 25']);
+  fail=true;const refused=await h.call('set_app_animation_timing',{speed:25});
+  assert.equal(refused.ok,false);assert.match((refused as {error:string}).error,/Probe helper refusal/);
+});
+
 test('camera commands are built from numbers only, in a fixed order, within limits', () => {
   assert.deepEqual(cameraCommands({ rz: 5, ry: 30, x: 1.23456789, fov: 40 }), ['cam x 1.2346', 'cam fov 40', 'cam ry 30', 'cam rz 5']);
   assert.throws(() => cameraCommands({}), /at least one/);
@@ -62,7 +77,7 @@ test('without the opt-in variable or off Windows every tool refuses to touch the
   let calls = 0;
   const run = async () => { calls++; return { ok: true }; };
   const off = setup(t, { env: {}, run });
-  for (const [name, args] of [['attach_magicavoxel_app', {}], ['set_app_camera', { ry: 1 }], ['export_native_render', { path: path.join(off.install.root, 'a.png') }]] as const) {
+  for (const [name, args] of [['attach_magicavoxel_app', {}], ['set_app_camera', { ry: 1 }], ['set_app_animation_timing', { speed: 1 }], ['export_native_render', { path: path.join(off.install.root, 'a.png') }]] as const) {
     const result = await off.call(name, args);
     assert.equal(result.ok, false);
     assert.match((result as { error: string }).error, /MAGICVOXEL_MCP_UI_AUTOMATION=1/);

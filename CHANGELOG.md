@@ -1,137 +1,64 @@
 # Changelog
 
-All notable changes to this project are documented in this file.
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-
 ## [Unreleased]
 
-## [1.5.0] - 2026-10-27
+## [1.0.0] - 2026-10-27
 
-### Added
+First stable release. Earlier development version labels are consolidated into
+1.0.0; commit history is retained. GitHub/local installation is supported without
+an npm account. This release does not publish the package to the npm registry.
 
-- `export_app_camera_snapshot`: actual live camera readback through a fresh native VOX Save As snapshot, with explicit camera-slot and active-filename side effects.
-- `export_native_sequence`: native Turntable and Anim Final Render, inclusive animation indices, bounded frame counts and per-frame stable-file/PNG-CRC/dimension verification.
-- Native workflow documentation, supervised color-changing animation checks and a preservation/compatibility matrix for every format family.
-- Portable native-output verifier regressions alongside Windows UI and real-protocol opt-in coverage.
+### Modeling and scenes
 
-### Fixed
+- Bounded voxel modeling, primitives, procedural generators, image conversion,
+  morphology, analysis, palette tools, previews and transactional model undo/redo.
+- VOX 150/200 scene loading/saving, multiple models, layers, node transforms,
+  materials, render/camera metadata and preservation of untouched unknown chunks.
+- Scene placement editing, independent bounded scene history, model replacement,
+  native key editing, lighting metadata presets and saved-camera poses.
+- Frame animations, per-frame durations, GIF/spritesheets and compiled native
+  shape animations. Compiled mode copies every quantized tick, including the last
+  source frame's hold, and writes native META _anim_range. Sparse mode is explicit.
+- Native range inspection/editing with set_scene_animation_range (0..360).
 
-- Native save paths target a positively identified filename control with exact dialog/field focus checks; pre-existing and unexpected dialogs stop input.
-- Helper scripts and payloads travel over ASCII-safe stdin envelopes, keeping the Windows command line short as the UI adapter grows.
-- Photo rendering explicitly selects Photo after a sequence instead of reusing the previous image mode.
-- `animation_to_scene` emits the native world/group/object/shape hierarchy, an object layer and shape `_loop`, rather than a root shape that can fail native animation playback.
+### Windows application workflows
 
+- Opt-in attachment pins executable path, PID and start time; guarded input uses
+  calibrated MagicaVoxel 0.99.7.2 controls and refuses unexpected existing dialogs.
+- Camera commands, native Save As camera snapshots and verified Photo, Turntable
+  and Anim PNG exports. Camera snapshots disclose slot/active-filename changes.
+- set_app_animation_timing submits bounded native range/frame/speed controls.
+  Speed is the native nonlinear 0..100 slider, not a fabricated FPS setting.
+- Animation export normalizes the active playback range before render, preventing
+  an old range from silently clamping requested frames. Native 0..2 rendering was
+  checked as red/blue/blue for unequal-duration compiled source frames.
 
-## [1.4.0] - 2026-10-27
+### Asset interchange
 
-### Added
+- Mesh OBJ/MTL/textures, PLY, STL and embedded glTF; SVG and solid/color OBJ import.
+- QB raw/RLE, XRAW indexed8/direct RGBA8, explicit headerless RAW rgba8/rgb8/indexed8,
+  Slab6 VOX, bounded Build-engine KVX and Sponge schem v2/v3; legacy schematic export.
+- Native asymmetric XRAW/QB/Slab6/OBJ/PLY fixtures verify occupancy, colors, axes,
+  centered pivots, surface geometry and six-bit palette conversion where applicable.
+- Explicit format-loss warnings, RAW layout metadata and rejection of ambiguous or
+  unsupported encodings rather than heuristic dialect guessing.
 
-- Scene object insertion, subtree duplication/removal, reparenting and explicit layer deletion/reassignment.
-- Independent bounded `undo_scene` and `redo_scene`, covering scene setters, graph edits, model replacement, presets and keyframes.
-- Typed material properties, studio/daylight/night lighting metadata presets and saved-camera poses with numeric validation.
-- Native transform/model keyframe inspection, editing and removal; `animation_to_scene` bridges the frame registry or explicit model IDs, reporting timing quantization and custom metadata limitations.
-- `load_magicavoxel_palette` and `apply_magicavoxel_palette`, with explicit recolor/nearest behavior and installation write protection.
-- `MAGICVOXEL_MCP_TOOLSETS`, per-tool group/effect/path metadata and structured JSON results without removing existing text/image content.
-- Cooperative request cancellation for queued operations, shader workers, automation helpers and native-render polling.
-- Local GitHub installation guidance, scene workflow examples and toolset/cancellation documentation; no npm account is required for local use.
+### Runtime and safety
 
-### Fixed
+- Explicit tool policies, selectable toolsets, structured JSON results, real stdio
+  integration tests and Windows/Linux CI across supported Node LTS lines.
+- Read-only installation discovery/assets; workspace and realpath confinement,
+  including Windows junctions and installation protection within broad workspaces.
+- Bounded PNG inflation/palettes, NBT decoding, scene copies/history/graph traversal
+  and RAW/KVX/XRAW voxel materialization; prototype-free untrusted dictionaries.
+- Bounded XS subset evaluator in a worker, cancellation/termination handshakes,
+  serialized live operations and fail-closed handling of unconfirmed helper exit.
+- Production package excludes developer tests/source while including compiled
+  workers, configuration examples and documentation.
 
-- Scene baking selects sparse/unsorted native frame indices consistently instead of using transform array positions. Shared graph expansion is bounded before traversal.
-- Scene decoding, copies and history account for object-heavy graphs and repeated models before expensive allocation, with independent retained and transient budgets.
-- Multi-model scene imports roll back registry insertions and IDs when capacity is exhausted.
-- Helper stop failures are retried within a bounded grace period; unconfirmed termination permanently disables tool execution with an actionable restart error rather than hanging or allowing unsafe concurrent input.
-- Shader cancellation awaits worker termination before rollback, while cancelled queued calls never prepare output paths or mutate models.
-- Existing Neon Alley demo remains loadable, editable and reproducible within the bounded scene policies.
+### Scope
 
-## [1.3.0] - 2026-10-26
-
-### Added
-
-- Opt-in live control of a running MagicaVoxel window on Windows (`MAGICVOXEL_MCP_UI_AUTOMATION=1`): `attach_magicavoxel_app` pins a process by executable path, id and start time; `set_app_camera` sends the application's console camera commands; `export_native_render` runs the native Final Render and returns only after the PNG has been verified.
-- `examples/neon-alley`: a complete scene built through the tools, with its script, palette, scene file and native render.
-- `inspectPng` validates PNG structure, bounds and (optionally) checksums without decoding pixels.
-
-- `set_scene_render_object` merges native render dictionaries by type; `set_scene_camera` merges camera slots 0..9. These are low-level saved-file controls, not native renderer automation.
-
-- Tools `get_magicavoxel_info`, `list_magicavoxel_samples`, `list_magicavoxel_palettes`, `list_magicavoxel_shaders`, `list_magicavoxel_ibl` and `load_magicavoxel_sample` (read-only discovery of a MagicaVoxel installation).
-- `MAGICAVOXEL_HOME` environment variable; the installation folder is resolved from it or from `MAGICAVOXEL_PATH`.
-- Read-only access to the installation's `vox`, `palette`, `shader`, `ibl` and `config` text files by absolute path, without weakening workspace confinement for writes.
-- Resources `magicavoxel://install`, `magicavoxel://samples`, `magicavoxel://palettes`, `magicavoxel://shaders`.
-- Read-only `config.txt` parser (the `$` folder convention, `workspace` entries, `io_*` export settings).
-- Tool-name snapshot test and `docs/baseline.md`.
-- `load_vox_models` loads every model of a multi-model or animated `.vox` file and opens it as a scene; `load_vox` gets `modelIndex` (the error for multi-model files now points to both options).
-- `flatten_scene` and `extract_scene_model {bake}` apply scene rotations and translations to produce world-space models (`src/sceneBake.ts`); `src/rotation.ts` provides packed `_r` helpers for the 24 orientations.
-- Typed codecs for `rOBJ`, `rCAM`, `NOTE`, `IMAP`, `META` and `MATL` (`src/voxChunks.ts`), exposed as `scene.render`; unchanged chunks and unknown keys or chunks are written back byte-for-byte.
-- Optional `lenient` parsing for `load_scene`, `load_vox_models` and `load_vox` with `warnings`; strict stays the default.
-- `replace_scene_model` accepts `remap: "nearest"` and names the first differing palette index; a palette-less model is read with the default palette.
-- Corpus tests against the installed MagicaVoxel samples (`MAGICAVOXEL_HOME` or `MAGICAVOXEL_PATH`, skipped when absent) and synthetic v200 fixtures for CI.
-- Palette tools: `import_palette_png`, `import_palette_act`, `import_palette_vox`, `export_palette_png`, `export_palette_act`, `export_palette_vox`, `remap_model_to_palette`, `quantize_model`, `sort_palette`, `find_nearest_color`, `merge_palettes`.
-- Voxel format tools: `export_qb`/`import_qb`, `export_xraw`/`import_xraw`, `export_slab6`/`import_slab6`, `export_minecraft_schem`/`import_minecraft_schem` (Sponge v2/v3).
-- `export_obj` options `profile` (`basic` or `magica`), `scale`, `axis`, `cw` and `merge`; `export_ply`, `export_stl` and `export_gltf` accept `scale` and `axis` (STL also `merge`).
-- `import_obj` solid fill, vertex/material/texture colors, `fit`, `scale` and `axis`, and warnings for open meshes.
-- `import_svg` paths, fills, groups, transforms, ellipses, polygons and rounded rectangles, with explicit "unsupported SVG" errors.
-- `export_animation_gif` options `quantize`, `dither` and `maxColors`; the result lists `warnings`.
-- xs shader tools: `list_xs_shaders`, `read_xs_shader`, `validate_xs_shader`, `write_xs_shader`, `generate_xs_shader_template`, `run_xs_shader`.
-- Sandboxed interpreter for a documented GLSL subset of `map(vec3)`; decision record in `docs/xs-shader-evaluation.md`.
-- `MAGICAVOXEL_HOME` environment variable (read-only access to the install `shader` folder).
-
-### Changed
-
-- `magicavoxel:samples` and `magicavoxel:palettes` (deprecated, use the new URIs) now read the installation instead of the workspace.
-- `open_in_magicavoxel` only opens `.vox` files, starts the application in its installation folder and reports `MAGICAVOXEL_PATH` when unconfigured.
-- Scenes are kept parsed in memory with copy-on-write edits and id indexes instead of being decoded on every call; see `docs/scene-performance.md`.
-- OBJ, glTF, PLY and STL exports now use proper axis rotations (Y-up for OBJ and glTF, Z-up for STL) instead of swapping Y and Z, which mirrored the model. Output sizes are unchanged.
-- `import_obj` size parameters are optional; without them the mesh keeps its size (`scale` 1).
-- Output-style tools now include names starting with `write_` (workspace path policy, no undo entry).
-- Shader evaluation runs in a worker with a parent-side deadline; protocol pings remain responsive and failed runs roll back.
-
-### Fixed
-
-- `set_scene_material` accepts material id 256.
-- Exports read palette colors in the correct byte order: red and blue were swapped in OBJ, PLY, glTF, slices and the legacy schematic.
-- Preview, sprite sheet and GIF colors now use the same little-endian RGBA packing as VOX palettes.
-- Installation files stay read-only even when they are inside the configured workspace.
-- Shader palette() reads the official default palette when a model has no custom palette.
-- Inline shader sources no longer hit the generic 4096-character string limit.
-- PNG decoding checks dimensions and decompression size before allocation, including interlaced images and palette files.
-- Schematic NBT decoding enforces cumulative node, collection and allocation budgets and uses prototype-free dictionaries.
-- OBJ texture references are resolved relative to their material library, retaining workspace confinement.
-
-### Tests
-
-- Directory-link (junction) escape tests run on Windows; added nested, in-workspace, dangling and file-link cases.
-
-## [1.2.0]
-
-### Changed
-
-Breaking renames (the package was never published, so no aliases are provided):
-
-- Product name is now `magicvoxel-mcp` for the npm package, the executable (`bin`) and the MCP server name (was `voxel-mcp` / `magica-mcp`).
-- Environment variable `VOXEL_MCP_WORKSPACE` -> `MAGICVOXEL_MCP_WORKSPACE`.
-- Tool `generate_ankara_block` -> `generate_city_block`.
-- Tool `open_in_magica` -> `open_in_magicavoxel`.
-- Resource URIs `magica:models`, `magica:vox/{folder}`, `magica:samples`, `magica:palettes` -> `magicavoxel:models`, `magicavoxel:vox/{folder}`, `magicavoxel:samples`, `magicavoxel:palettes`.
-- `generate_venue_character` `role`, `generate_staff` `type` and `generate_customer` `type` now use neutral English values (for example `hostess`, `customer`, `waiter`, `cook`, `police_officer`, `gangster`, `detective`, `bartender`, `retiree`, `farmer`). See each tool's input schema for the full list.
-- Prompt-based generation now recognizes English keywords only (`house`, `building`, `home`, `cottage`, `N floors`/`N storeys`, `character`, `humanoid`, `person`, `robot`, `sphere`, `ball`, `globe`).
-- All tool descriptions, error messages, comments, tests and documentation are now English and culturally neutral.
-
-### Added
-
-- Language and naming check (`tests/language.test.ts`) that keeps tracked sources ASCII-only and free of locale-specific terms and old names.
-- Generic client configuration example `client-config/mcp-client.json`.
-
-## [1.1.0]
-
-### Fixed
-
-- The server now starts against the current MCP SDK, with working tool, resource and prompt registration.
-- The VOX reader traverses the MAIN chunk correctly and validates its input; the official default palette is used.
-
-### Added
-
-- Multi-model scenes with transform, group, shape, layer and material metadata; unknown chunks are preserved.
-- Undo/redo with transactional rollback, workspace-confined file access and input limits.
-- `render_model` PNG previews, GIF export, and glTF/OBJ/STL/PLY/NBT-schematic export corrections.
-- Test suite (including real stdio MCP sessions) and continuous integration.
+Windows live control only; macOS/Linux live control is out of scope. Cross-platform
+file/model tools remain available. No universal byte-identical conversion, native
+hard-real-time FPS guarantee, passive camera-memory polling or complete GLSL is
+claimed. See the format and native-workflow compatibility documents.

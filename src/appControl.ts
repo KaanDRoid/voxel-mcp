@@ -19,12 +19,28 @@ export const UI_AUTOMATION_ENV = "MAGICVOXEL_MCP_UI_AUTOMATION";
 export const UI_ANY_VERSION_ENV = "MAGICVOXEL_MCP_UI_ANY_VERSION";
 export const CALIBRATED_VERSION = "0.99.7.2";
 /** Tools that drive the real application window; they are never read-only. */
-export const APP_CONTROL_TOOLS = ["attach_magicavoxel_app", "set_app_camera", "export_native_render", "export_app_camera_snapshot", "export_native_sequence"];
+export const APP_CONTROL_TOOLS = ["attach_magicavoxel_app", "set_app_camera", "set_app_animation_timing", "export_native_render", "export_app_camera_snapshot", "export_native_sequence"];
 
 /** Identity of one running application process. A title or a file name alone is never trusted. */
 export interface AppIdentity { pid: number; exe: string; startFileTime: string }
 
 export type PowerShellRunner = (script: string, input: unknown, timeoutMs: number) => Promise<unknown>;
+
+const appAnimationSchema = z.object({
+  start: z.number().int().min(0).max(360).optional(), end: z.number().int().min(0).max(360).optional(),
+  frameIndex: z.number().int().min(0).max(360).optional(), speed: z.number().min(0).max(100).optional(),
+}).strict().superRefine((v, c) => {
+  if ((v.start === undefined) !== (v.end === undefined) || (v.start !== undefined && v.end! < v.start)) c.addIssue({ code: 'custom', message: 'Provide an ordered start/end pair' });
+  if (v.start === undefined && v.frameIndex === undefined && v.speed === undefined) c.addIssue({ code: 'custom', message: 'Provide a range, frameIndex or native speed' });
+});
+/** a_speed is the native nonlinear 0..100 slider, NOT a frame rate or millisecond interval. */
+export function appAnimationCommands(input: unknown): string[] {
+  const v = appAnimationSchema.parse(input), commands: string[] = [];
+  if (v.start !== undefined) commands.push(`set a_min 0`, `set a_max ${v.end!}`, `set a_min ${v.start}`);
+  if (v.frameIndex !== undefined) commands.push(`set a_time ${v.frameIndex}`);
+  if (v.speed !== undefined) commands.push(`set a_speed ${Number(v.speed.toFixed(4))}`);
+  return commands;
+}
 
 const CAMERA_KEYS = ["x", "y", "z", "zoom", "fov", "rx", "ry", "rz"] as const;
 export type CameraKey = (typeof CAMERA_KEYS)[number];
@@ -448,6 +464,13 @@ export function registerAppControlTools(register: RegisterTool, files: FilePolic
   };
 
   registerNativeOutputs(register, files, { enabled, exclusive, execute, checkPath: checkTypablePath, sleep, now, settle });
+  register({ name: "set_app_animation_timing", description: "Submit numeric native animation range (inclusive 0..360), current frame and/or native speed (0..100 nonlinear slider, NOT FPS or milliseconds). Windows opt-in and attached Render-mode window required. Stop native playback before calling: playback's modal task can ignore console input. Reports submission only; saved range can be checked in a subsequent native VOX snapshot. Speed is application state, not a standardized VOX file FPS field.", inputSchema: appAnimationSchema }, args => exclusive(async () => {
+    enabled();
+    const commands = appAnimationCommands(args);
+    await execute(commands.map(command => ({ op: "console", text: command, waitMs: 500 })), 45000);
+    return text({ submitted: commands, processVerified: true, speedUnits: "native nonlinear 0..100 slider, not FPS or milliseconds", applied: "not confirmed by the application" });
+  }));
+
 
   register({
     name: "attach_magicavoxel_app",

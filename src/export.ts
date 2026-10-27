@@ -45,7 +45,7 @@ export function exportOBJ(model: VoxModelData, path: string, opts: ObjOptions = 
     let idx = vertexMap.get(key);
     if (idx === undefined) {
       idx = vertexLines.length; vertexMap.set(key, idx);
-      const out = t.point(p).map(fmt);
+      const out = t.point(magica ? [p[0]! - Math.floor(model.sizeX / 2), p[1]! - Math.floor(model.sizeY / 2), p[2]!] : p).map(fmt);
       if (magica) vertexLines.push(`v ${out.join(" ")}`);
       else { const c = unpackRGBA(palette[color] ?? 0); vertexLines.push(`v ${out.join(" ")} ${fmt(c.r / 255)} ${fmt(c.g / 255)} ${fmt(c.b / 255)}`); }
     }
@@ -81,7 +81,8 @@ export function exportOBJ(model: VoxModelData, path: string, opts: ObjOptions = 
 }
 
 /** Point cloud: one vertex per voxel, at the voxel corner (voxel coordinates), with vertex colors. */
-export function exportPLY(model: VoxModelData, path: string, opts: { scale?: number | undefined; axis?: string | undefined } = {}) {
+export function exportPLY(model: VoxModelData, path: string, opts: { profile?: "points" | "magica" | undefined; scale?: number | undefined; axis?: string | undefined; cw?: boolean | undefined; merge?: boolean | undefined } = {}) {
+  if (opts.profile === "magica") { exportNativeStylePLY(model, path, opts); return; }
   const t = makeTransform({ axis: opts.axis, scale: opts.scale }, "XZ-Y");
   const palette = model.palette ?? defaultPalette();
   const lines: string[] = [];
@@ -93,6 +94,27 @@ export function exportPLY(model: VoxModelData, path: string, opts: { scale?: num
   const header = ["ply", "format ascii 1.0", `element vertex ${lines.length}`, "property float x", "property float y", "property float z",
     "property uchar red", "property uchar green", "property uchar blue", "end_header"];
   fs.writeFileSync(path, header.join("\n") + "\n" + lines.join("\n") + (lines.length ? "\n" : ""));
+}
+
+/** Native PLY uses an RGB surface mesh, XYZ axes, scale 0.1 and floor-centered XY pivot. */
+function exportNativeStylePLY(model: VoxModelData, file: string, options: { scale?: number | undefined; axis?: string | undefined; cw?: boolean | undefined; merge?: boolean | undefined }): void {
+  const t = makeTransform({ scale: options.scale ?? 0.1, axis: options.axis, cw: options.cw }, "XYZ");
+  const quads = buildQuads(model, options.merge ?? false);
+  const palette = model.palette ?? defaultPalette();
+  const vertices: string[] = [], faces: string[] = [];
+  for (const quad of quads) {
+    const color = unpackRGBA(palette[quad.color] ?? 0);
+    const first = vertices.length;
+    for (const p of quad.corners) {
+      const out = t.point([p[0]! - Math.floor(model.sizeX / 2), p[1]! - Math.floor(model.sizeY / 2), p[2]!]);
+      vertices.push(`${out.map(fmt).join(" ")} ${color.r} ${color.g} ${color.b}`);
+    }
+    const ids = [first, first + 1, first + 2, first + 3];
+    if (t.flip) ids.reverse();
+    faces.push(`4 ${ids.join(" ")}`);
+  }
+  const header = ["ply", "format ascii 1.0", `element vertex ${vertices.length}`, "property float x", "property float y", "property float z", "property uchar red", "property uchar green", "property uchar blue", `element face ${faces.length}`, "property list uchar int vertex_index", "end_header"];
+  writeFileNoFollow(file, header.join("\n") + "\n" + vertices.join("\n") + (vertices.length ? "\n" : "") + faces.join("\n") + (faces.length ? "\n" : ""));
 }
 
 export function exportSlices(model: VoxModelData, folder: string) {
